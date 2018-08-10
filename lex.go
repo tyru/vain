@@ -73,9 +73,9 @@ func lex(name, input string) *lexer {
 	}
 }
 
-// run lexes the input by executing state functions until
+// Run lexes the input by executing state functions until
 // the state is nil.
-func (l *lexer) run() {
+func (l *lexer) Run() {
 	for state := lexTop; state != nil; {
 		state = state(l)
 	}
@@ -234,7 +234,7 @@ func (l *lexer) emit(t tokenType) {
 
 // errorf returns an error token and terminates the scan
 // by passing back a nil pointer that will be the next
-// state, terminating l.run.
+// state, terminating l.Run.
 func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
 	l.tokens <- token{
 		tokenError,

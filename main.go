@@ -116,12 +116,12 @@ func transpile(dst io.Writer, src io.Reader, srcpath string) error {
 	done := make(chan bool, 1)
 	lexer := lex(srcpath, content.String())
 	parser := parse(lexer)
-	translator := translate(parser)
+	translator := translateAST(parser)
 	errs := make([]error, 0, 32)
 
 	// 4. Output
 	go func() {
-		for r := range translator.readers {
+		for r := range translator.Readers() {
 			_, err := io.Copy(dstbuf, r)
 			if err != nil {
 				errs = append(errs, err)
@@ -131,13 +131,13 @@ func transpile(dst io.Writer, src io.Reader, srcpath string) error {
 	}()
 
 	// 3. Translate
-	go translator.run()
+	go translator.Run()
 
 	// 2. Parse
-	go parser.run()
+	go parser.Run()
 
 	// 1. Lex
-	go lexer.run()
+	go lexer.Run()
 
 	<-done
 

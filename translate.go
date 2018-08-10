@@ -1,20 +1,27 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 )
 
-func translate(p *parser) *translator {
-	return &translator{p, make(chan io.Reader)}
+type translator interface {
+	Run()
+	Readers() <-chan io.Reader
 }
 
-type translator struct {
+func translateAST(p *parser) translator {
+	return &astTranslator{p, make(chan io.Reader)}
+}
+
+type astTranslator struct {
 	parser  *parser
 	readers chan io.Reader
 }
 
-func (t *translator) run() {
+func (t *astTranslator) Run() {
 	for node := range t.parser.nodes {
 		switch n := node.(type) {
 		case *errorNode:
@@ -26,7 +33,11 @@ func (t *translator) run() {
 	close(t.readers)
 }
 
-func (t *translator) emit(r reader) {
+func (t *astTranslator) Readers() <-chan io.Reader {
+	return t.readers
+}
+
+func (t *astTranslator) emit(r reader) {
 	t.readers <- r
 }
 
@@ -44,29 +55,19 @@ type importStatementReader struct {
 	io.Reader
 }
 
-func newImportStatementReader(stmt *importStatement) *importStatementReader {
+func newImportStatementReader(stmt *importStatement) reader {
 	var builder strings.Builder
 
-	builder.WriteString("import ")
-	if stmt.brace {
-		builder.WriteString("{ ")
+	fnlist, err := json.Marshal(stmt.fnlist)
+	if err != nil {
+		return &errorReader{err}
 	}
-	first := true
-	for _, pair := range stmt.fnlist {
-		if !first {
-			builder.WriteString(", ")
-		}
-		if pair[0] == pair[1] {
-			builder.WriteString(pair[0])
-		} else {
-			builder.WriteString(pair[0] + " as " + pair[1])
-		}
-		first = false
+	pkg, err := json.Marshal(stmt.pkg)
+	if err != nil {
+		return &errorReader{err}
 	}
-	if stmt.brace {
-		builder.WriteString(" } ")
-	}
-	builder.WriteString(" from " + stmt.pkg + "\n")
+
+	builder.WriteString(fmt.Sprintf("importStatement(%v,%v,%v)\n", stmt.brace, string(fnlist), string(pkg)))
 
 	r := strings.NewReader(builder.String())
 	return &importStatementReader{r}

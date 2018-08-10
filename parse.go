@@ -49,7 +49,7 @@ type importStatement struct {
 	pkg    string
 }
 
-func (p *parser) run() {
+func (p *parser) Run() {
 	for state := parseTop; state != nil; {
 		state = state(p)
 	}
@@ -128,7 +128,7 @@ func (p *parser) accept(typ tokenType) bool {
 
 // errorf returns an error token and terminates the scan
 // by passing back a nil pointer that will be the next
-// state, terminating l.run.
+// state, terminating l.Run.
 func (p *parser) errorf(format string, args ...interface{}) parseStateFn {
 	p.emit(&errorNode{err: fmt.Errorf(format, args...), pos: p.start})
 	return nil
