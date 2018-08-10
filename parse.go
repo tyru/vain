@@ -37,16 +37,17 @@ type node interface {
 	Position() pos
 }
 
+type expr interface {
+	node
+}
+
+type statement interface {
+	node
+}
+
 type errorNode struct {
 	pos
 	err error
-}
-
-type importStatement struct {
-	pos
-	brace  bool
-	fnlist [][]string
-	pkg    string
 }
 
 func (p *parser) Run() {
@@ -58,14 +59,12 @@ func (p *parser) Run() {
 
 // emitErrorf is called when unexpected token was given.
 // This is normally lexer's bug.
-func (p *parser) emitErrorf(msg string, args ...interface{}) {
+func (p *parser) emitErrorf(msg string, args ...interface{}) parseStateFn {
 	if p.token.typ == tokenEOF {
-		p.unexpectedEOF()
-		return
+		return p.unexpectedEOF()
 	}
 	if p.token.typ == tokenError {
-		p.tokenError()
-		return
+		return p.tokenError()
 	}
 	if msg == "" {
 		_, file, line, ok := runtime.Caller(1)
@@ -79,14 +78,16 @@ func (p *parser) emitErrorf(msg string, args ...interface{}) {
 	}
 	// TODO: show caller functions, and so on
 	p.nodes <- &errorNode{err: errors.New(msg), pos: p.start}
+	return nil
 }
 
 // unexpectedEOF is called when tokenEOF was given and it's unexpected.
-func (p *parser) unexpectedEOF() {
+func (p *parser) unexpectedEOF() parseStateFn {
 	p.nodes <- &errorNode{
 		err: errors.New("unexpected EOF"),
 		pos: p.start,
 	}
+	return nil
 }
 
 // tokenError is called when tokenError was given.
@@ -150,10 +151,19 @@ func parseTop(p *parser) parseStateFn {
 			return p.tokenError()
 		case tokenImport:
 			return parseImportStatement
+		case tokenFunc:
+			return parseFuncStatement
 		default:
 			return p.errorf("unimplemented token: token = %+v", token)
 		}
 	}
+}
+
+type importStatement struct {
+	pos
+	brace  bool
+	fnlist [][]string
+	pkg    string
 }
 
 func parseImportStatement(p *parser) parseStateFn {
@@ -163,13 +173,11 @@ func parseImportStatement(p *parser) parseStateFn {
 	}
 
 	if !p.accept(tokenFrom) {
-		p.emitErrorf("")
-		return nil
+		return p.emitErrorf("")
 	}
 
 	if !p.accept(tokenString) {
-		p.emitErrorf("")
-		return nil
+		return p.emitErrorf("")
 	}
 	pkg, ok := evalString(p, p.token)
 	if !ok {
@@ -267,4 +275,132 @@ func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 	}
 
 	return brace, fnlist, true
+}
+
+type funcStatement struct {
+	pos
+	mods []string
+	name string
+	args []argument
+	body []node
+}
+
+type argument struct {
+	name       string
+	typ        string
+	defaultVal expr
+}
+
+func parseFuncStatement(p *parser) parseStateFn {
+	var mods []string
+	var name string
+	var args []argument
+	var body []node
+
+	// Modifiers
+	if p.accept(tokenLeftAngleBracket) {
+		p.backup()
+		var ok bool
+		mods, ok = parseModifiers(p)
+		if !ok {
+			return nil
+		}
+	}
+
+	// Function name
+	if !p.accept(tokenIdentifier) {
+		return p.emitErrorf("")
+	}
+	name = p.token.val
+
+	// Arguments
+	if !p.accept(tokenLeftParen) {
+		return p.emitErrorf("")
+	}
+	for {
+		if p.accept(tokenRightParen) {
+			break
+		}
+		arg, ok := parseArgument(p)
+		if !ok {
+			return nil
+		}
+		args = append(args, *arg)
+		if !p.accept(tokenComma) {
+			return p.emitErrorf("")
+		}
+	}
+
+	if !p.accept(tokenLeftBrace) {
+		return p.emitErrorf("")
+	}
+
+	// TODO parse expr
+
+	if !p.accept(tokenRightBrace) {
+		return p.emitErrorf("")
+	}
+
+	p.emit(&funcStatement{p.start, mods, name, args, body})
+	return parseTop
+}
+
+func parseModifiers(p *parser) ([]string, bool) {
+	if !p.accept(tokenLeftAngleBracket) {
+		p.emitErrorf("")
+		return nil, false
+	}
+	mods := make([]string, 0, 8)
+	for {
+		if !p.accept(tokenIdentifier) {
+			p.emitErrorf("")
+			return nil, false
+		}
+		mods = append(mods, p.token.val)
+		if p.accept(tokenComma) {
+			continue
+		}
+		if p.accept(tokenRightAngleBracket) {
+			break
+		}
+		p.emitErrorf("")
+		return nil, false
+	}
+	return mods, true
+}
+
+// name: type
+// name = defaultValue
+func parseArgument(p *parser) (*argument, bool) {
+	var name string
+	var typ string
+
+	if !p.accept(tokenIdentifier) {
+		p.emitErrorf("")
+		return nil, false
+	}
+	name = p.token.val
+
+	// name: type
+	if p.accept(tokenColon) {
+		if !p.accept(tokenIdentifier) {
+			p.emitErrorf("")
+			return nil, false
+		}
+		typ = p.token.val
+		return &argument{name, typ, nil}, true
+	}
+
+	// name = defaultValue
+	if p.accept(tokenEqual) {
+		// TODO parse expr
+		if !p.accept(tokenIdentifier) {
+			p.emitErrorf("")
+			return nil, false
+		}
+		return &argument{name, "", nil}, true
+	}
+
+	p.emitErrorf("")
+	return nil, false
 }

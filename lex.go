@@ -32,32 +32,32 @@ type tokenType int
 const (
 	tokenError tokenType = iota // error occurred; value is text of error
 	tokenEOF
-
 	tokenIdentifier
-
 	tokenComma
+	tokenEqual
+	tokenColon
+	tokenQuestion
+	tokenAsterisk
 	tokenLeftBracket
 	tokenRightBracket
 	tokenLeftAngleBracket
 	tokenRightAngleBracket
 	tokenLeftBrace
 	tokenRightBrace
-
+	tokenLeftParen
+	tokenRightParen
 	tokenNumber
 	tokenString
 	tokenBoolean
 	tokenNone
-
 	tokenLtEq
 	tokenLtEqCi
 	tokenGtEq
 	tokenGtEqCi
-
-	tokenQuestion
-	tokenAsterisk
-
+	tokenConst
+	tokenVar
+	tokenFunc
 	tokenReturn
-
 	tokenImport
 	tokenAs
 	tokenFrom
@@ -297,6 +297,12 @@ func lexTop(l *lexer) lexStateFn {
 	case '}':
 		l.emit(tokenRightBrace)
 		return lexTop
+	case '(':
+		l.emit(tokenLeftParen)
+		return lexTop
+	case ')':
+		l.emit(tokenRightParen)
+		return lexTop
 	case '?':
 		l.emit(tokenQuestion)
 		return lexTop
@@ -305,6 +311,12 @@ func lexTop(l *lexer) lexStateFn {
 		return lexTop
 	case ',':
 		l.emit(tokenComma)
+		return lexTop
+	case '=':
+		l.emit(tokenEqual)
+		return lexTop
+	case ':':
+		l.emit(tokenColon)
 		return lexTop
 	default:
 		l.backup()
@@ -318,6 +330,15 @@ func lexTop(l *lexer) lexStateFn {
 	// Reserved words
 	w := l.nextRunBy(isAlphaNumeric)
 	switch w {
+	case "const":
+		l.emit(tokenConst)
+		return lexTop
+	case "var":
+		l.emit(tokenVar)
+		return lexTop
+	case "func":
+		l.emit(tokenFunc)
+		return lexTop
 	case "return":
 		l.emit(tokenReturn)
 		return lexTop

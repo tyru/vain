@@ -28,6 +28,8 @@ func (t *astTranslator) Run() {
 			t.emit(&errorReader{n.err})
 		case *importStatement:
 			t.emit(newImportStatementReader(n))
+		case *funcStatement:
+			t.emit(newFuncStatementReader(n))
 		}
 	}
 	close(t.readers)
@@ -56,9 +58,7 @@ type importStatementReader struct {
 }
 
 func newImportStatementReader(stmt *importStatement) reader {
-	var builder strings.Builder
-
-	fnlist, err := json.Marshal(stmt.fnlist)
+	fnlist, err := marshalDefault(stmt.fnlist, "[]")
 	if err != nil {
 		return &errorReader{err}
 	}
@@ -67,8 +67,43 @@ func newImportStatementReader(stmt *importStatement) reader {
 		return &errorReader{err}
 	}
 
-	builder.WriteString(fmt.Sprintf("importStatement(%v,%v,%v)\n", stmt.brace, string(fnlist), string(pkg)))
-
-	r := strings.NewReader(builder.String())
+	s := fmt.Sprintf("importStatement(%v,%v,%v)\n", stmt.brace, string(fnlist), string(pkg))
+	r := strings.NewReader(s)
 	return &importStatementReader{r}
+}
+
+type funcStatementReader struct {
+	io.Reader
+}
+
+func newFuncStatementReader(stmt *funcStatement) reader {
+	mods, err := marshalDefault(stmt.mods, "[]")
+	if err != nil {
+		return &errorReader{err}
+	}
+	name, err := json.Marshal(stmt.name)
+	if err != nil {
+		return &errorReader{err}
+	}
+	args, err := marshalDefault(stmt.args, "[]")
+	if err != nil {
+		return &errorReader{err}
+	}
+	body, err := marshalDefault(stmt.body, "[]")
+	if err != nil {
+		return &errorReader{err}
+	}
+
+	s := fmt.Sprintf("funcStatement(%v,%v,%v,%v)\n",
+		string(mods), string(name), string(args), string(body))
+	r := strings.NewReader(s)
+	return &funcStatementReader{r}
+}
+
+func marshalDefault(v interface{}, defVal string) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if string(b) == "null" {
+		b = []byte(defVal)
+	}
+	return b, err
 }
