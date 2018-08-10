@@ -32,12 +32,33 @@ type tokenType int
 const (
 	tokenError tokenType = iota // error occurred; value is text of error
 	tokenEOF
+
 	tokenIdentifier
+
 	tokenComma
-	tokenString
-	tokenImport
+	tokenLeftBracket
+	tokenRightBracket
+	tokenLeftAngleBracket
+	tokenRightAngleBracket
 	tokenLeftBrace
 	tokenRightBrace
+
+	tokenNumber
+	tokenString
+	tokenBoolean
+	tokenNone
+
+	tokenLtEq
+	tokenLtEqCi
+	tokenGtEq
+	tokenGtEqCi
+
+	tokenQuestion
+	tokenAsterisk
+
+	tokenReturn
+
+	tokenImport
 	tokenAs
 	tokenFrom
 )
@@ -183,7 +204,8 @@ func (l *lexer) acceptRunBy(pred func(rune) bool) {
 }
 
 // acceptKeyword consumes a run of string
-func (l *lexer) acceptKeyword(kw string) bool {
+// Check boundary if boundary == true
+func (l *lexer) acceptKeyword(kw string, boundary bool) bool {
 	l.save()
 	runes := []rune(kw)
 	n := len(runes)
@@ -193,6 +215,13 @@ func (l *lexer) acceptKeyword(kw string) bool {
 			l.restore()
 			return false
 		}
+	}
+	if boundary {
+		// Next thing mustn't be alphanumeric.
+		if isAlphaNumeric(l.next()) {
+			return false
+		}
+		l.backup()
 	}
 	return true
 }
@@ -215,6 +244,10 @@ func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
 	return nil
 }
 
+func isNumeric(r rune) bool {
+	return unicode.IsDigit(r)
+}
+
 func isAlphaNumeric(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
@@ -225,128 +258,133 @@ func lexTop(l *lexer) lexStateFn {
 		return nil
 	}
 
-	// Statements begins with alpha numeric keyword.
-	// Try to parse statements.
-	if l.acceptBy(isAlphaNumeric) {
+	r := l.next()
+	switch r {
+	case '\'', '"':
 		l.backup()
-		l.save()
-		word := l.nextRunBy(isAlphaNumeric)
-		switch word {
-		case "import":
-			l.emit(tokenImport)
-			return lexImport
+		return lexString
+	case '[':
+		l.emit(tokenLeftBracket)
+		return lexTop
+	case ']':
+		l.emit(tokenRightBracket)
+		return lexTop
+	case '<':
+		if l.acceptKeyword("=?", false) {
+			l.emit(tokenLtEqCi)
+			return lexTop
 		}
-		l.restore()
+		if l.acceptKeyword("=", false) {
+			l.emit(tokenLtEq)
+			return lexTop
+		}
+		l.emit(tokenLeftAngleBracket)
+		return lexTop
+	case '>':
+		if l.acceptKeyword("=?", false) {
+			l.emit(tokenGtEqCi)
+			return lexTop
+		}
+		if l.acceptKeyword("=", false) {
+			l.emit(tokenGtEq)
+			return lexTop
+		}
+		l.emit(tokenRightAngleBracket)
+		return lexTop
+	case '{':
+		l.emit(tokenLeftBrace)
+		return lexTop
+	case '}':
+		l.emit(tokenRightBrace)
+		return lexTop
+	case '?':
+		l.emit(tokenQuestion)
+		return lexTop
+	case '*':
+		l.emit(tokenAsterisk)
+		return lexTop
+	case ',':
+		l.emit(tokenComma)
+		return lexTop
+	default:
+		l.backup()
 	}
 
-	// If not statements, try to parse expression.
+	if l.acceptBy(isNumeric) {
+		l.backup()
+		return lexNumber
+	}
 
-	// TODO
-	l.next()
+	// Reserved words
+	w := l.nextRunBy(isAlphaNumeric)
+	switch w {
+	case "return":
+		l.emit(tokenReturn)
+		return lexTop
+	case "import":
+		l.emit(tokenImport)
+		return lexTop
+	case "as":
+		l.emit(tokenAs)
+		return lexTop
+	case "from":
+		l.emit(tokenFrom)
+		return lexTop
+	case "true", "false":
+		l.emit(tokenBoolean)
+		return lexTop
+	case "null", "none":
+		l.emit(tokenNone)
+		return lexTop
+	}
 
+	if w != "" {
+		l.emit(tokenIdentifier)
+		return lexTop
+	}
+
+	return l.errorf("unknown token")
+}
+
+func lexNumber(l *lexer) lexStateFn {
+	if !acceptNumber(l) {
+		return l.errorf("expected number literal")
+	}
+	l.emit(tokenNumber)
 	return lexTop
 }
 
-func lexImport(l *lexer) lexStateFn {
-	if l.ignoreSpaces() == eof {
-		return l.errorf("unexpected EOF in import statement")
+// TODO Should we split Int/Float tokens?
+func acceptNumber(l *lexer) bool {
+	// Optional leading sign.
+	l.accept("+-")
+	// Is it hex?
+	digits := "0123456789"
+	if l.accept("0") && l.accept("xX") {
+		digits = "0123456789abcdefABCDEF"
 	}
-
-	// left brace
-	brace := false
-	if l.accept("{") {
-		l.emit(tokenLeftBrace)
-		brace = true
+	l.acceptRun(digits)
+	if l.accept(".") {
+		l.acceptRun(digits)
 	}
-
-	if l.ignoreSpaces() == eof {
-		return l.errorf("unexpected EOF in import statement")
+	if l.accept("eE") {
+		l.accept("+-")
+		l.acceptRun("0123456789")
 	}
-
-	for {
-		// import identifier
-		if acceptImportFunction(l) {
-			l.emit(tokenIdentifier)
-		} else {
-			return l.errorf("expected package name in import statement")
-		}
-
-		if l.ignoreSpaces() == eof {
-			return l.errorf("unexpected EOF in import statement")
-		}
-
-		// as
-		if l.acceptKeyword("as") {
-			l.emit(tokenAs)
-
-			if l.ignoreSpaces() == eof {
-				return l.errorf("unexpected EOF in import statement")
-			}
-
-			// import function
-			if acceptImportFunction(l) {
-				l.emit(tokenIdentifier)
-			} else {
-				return l.errorf("expected package name in import statement")
-			}
-		}
-
-		if l.ignoreSpaces() == eof {
-			return l.errorf("unexpected EOF in import statement")
-		}
-
-		// right brace
-		if brace && l.accept("}") {
-			l.emit(tokenRightBrace)
-			break
-		}
-
-		// if found comma, continue to the next import function
-		if l.accept(",") {
-			l.emit(tokenComma)
-			if l.ignoreSpaces() == eof {
-				return l.errorf("unexpected EOF in import statement")
-			}
-			continue
-		}
-		break
+	// Next thing mustn't be alphanumeric.
+	if isAlphaNumeric(l.next()) {
+		return false
 	}
+	l.backup()
+	return true
+}
 
-	if l.ignoreSpaces() == eof {
-		return l.errorf("unexpected EOF in import statement")
-	}
-
-	// from
-	if !l.acceptKeyword("from") {
-		return l.errorf("expected \"from\" keyword in import statement")
-	}
-	l.emit(tokenFrom)
-
-	if l.ignoreSpaces() == eof {
-		return l.errorf("unexpected EOF in import statement")
-	}
-
-	// package name
+func lexString(l *lexer) lexStateFn {
 	if err := acceptString(l); err != nil {
-		return l.errorf("expected package name in import statement: " + err.Error())
+		return l.errorf(err.Error())
 	}
 	l.emit(tokenString)
-
 	return lexTop
-}
-
-// import { <import function> } from 'pkg'
-// import { <import function>, <import function> } from 'pkg'
-// import <import function> from 'pkg'
-// import <import function> as foo from 'pkg'
-func acceptImportFunction(l *lexer) bool {
-	if l.accept("*") {
-		return true
-	} else if l.acceptBy(isAlphaNumeric) {
-		l.acceptRunBy(isAlphaNumeric)
-		return true
-	}
-	return false
 }
 
 // A string literal is same as Vim script.

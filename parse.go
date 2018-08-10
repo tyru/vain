@@ -35,9 +35,9 @@ func (p *parser) run() {
 	close(p.nodes) // No more nodes will be delivered.
 }
 
-// lexBug is called when unexpected token was given.
+// emitErrorf is called when unexpected token was given.
 // This is normally lexer's bug.
-func (p *parser) lexBug() {
+func (p *parser) emitErrorf(msg string, args ...interface{}) {
 	if p.token.typ == tokenEOF {
 		p.unexpectedEOF()
 		return
@@ -46,12 +46,15 @@ func (p *parser) lexBug() {
 		p.tokenError()
 		return
 	}
-	_, file, line, ok := runtime.Caller(1)
-	var msg string
-	if ok {
-		msg = fmt.Sprintf("fatal: unexpected token was given. this may be a lexer bug:\n  %s (line %d)", file, line)
+	if msg == "" {
+		_, file, line, ok := runtime.Caller(1)
+		if ok {
+			msg = fmt.Sprintf("fatal: unexpected token was given. this may be a lexer bug:\n  %s (line %d)", file, line)
+		} else {
+			msg = "fatal: unexpected token was given. this may be a lexer bug"
+		}
 	} else {
-		msg = "fatal: unexpected token was given. this may be a lexer bug"
+		msg = fmt.Sprintf(msg, args...)
 	}
 	// TODO: show caller functions, and so on
 	p.nodes <- &errorNode{err: errors.New(msg), pos: p.start}
@@ -66,11 +69,12 @@ func (p *parser) unexpectedEOF() {
 }
 
 // tokenError is called when tokenError was given.
-func (p *parser) tokenError() {
+func (p *parser) tokenError() parseStateFn {
 	p.nodes <- &errorNode{
-		err: errors.New("lex error: " + p.token.val),
+		err: errors.New(p.token.val),
 		pos: p.start,
 	}
+	return nil
 }
 
 func (p *parser) next() *token {
@@ -122,7 +126,7 @@ func parseTop(p *parser) parseStateFn {
 		case tokenEOF:
 			return nil
 		case tokenError:
-			return p.errorf(token.val)
+			return p.tokenError()
 		case tokenImport:
 			return parseImportStatement
 		default:
@@ -162,12 +166,12 @@ func parseImportStatement(p *parser) parseStateFn {
 	}
 
 	if !p.accept(tokenFrom) {
-		p.lexBug()
+		p.emitErrorf("")
 		return nil
 	}
 
 	if !p.accept(tokenString) {
-		p.lexBug()
+		p.emitErrorf("")
 		return nil
 	}
 	pkg, ok := evalString(p, p.token)
@@ -197,7 +201,7 @@ func evalString(p *parser, t *token) (string, bool) {
 		case '\\':
 			i++
 			if i >= len(s) {
-				p.lexBug()
+				p.emitErrorf("")
 				return "", false
 			}
 			switch s[i] {
@@ -227,6 +231,10 @@ func evalString(p *parser, t *token) (string, bool) {
 	return result.String(), true
 }
 
+// import { <import function> } from 'pkg'
+// import { <import function>, <import function> } from 'pkg'
+// import <import function> from 'pkg'
+// import <import function> as foo from 'pkg'
 func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 	var brace bool
 	if p.accept(tokenLeftBrace) {
@@ -235,34 +243,37 @@ func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 
 	fnlist := make([][]string, 0, 1)
 	for {
-		if p.accept(tokenFrom) {
-			// End parsing function list.
-			p.backup()
-			break
-		}
-		if brace && p.accept(tokenRightBrace) {
-			// End parsing function list.
-			break
-		}
-
-		if !p.accept(tokenIdentifier) {
-			p.lexBug()
+		if !p.accept(tokenIdentifier) && !p.accept(tokenAsterisk) {
+			p.emitErrorf("")
 			return false, nil, false
 		}
 		orig := p.token.val
 		to := orig
 
 		if p.accept(tokenAs) {
-			if !p.accept(tokenIdentifier) {
-				p.lexBug()
+			if !p.accept(tokenIdentifier) && !p.accept(tokenAsterisk) {
+				p.emitErrorf("")
 				return false, nil, false
 			}
 			to = p.token.val
 		}
 		fnlist = append(fnlist, []string{orig, to})
 
-		p.accept(tokenComma)
+		if brace && p.accept(tokenRightBrace) {
+			break
+		}
+		if p.accept(tokenFrom) {
+			p.backup()
+			break
+		}
+		if p.accept(tokenComma) {
+			continue
+		}
+
+		p.emitErrorf("unexpected token %+v in import statement", p.token.val)
+		return false, nil, false
 	}
+
 	return brace, fnlist, true
 }
 
