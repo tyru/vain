@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"runtime"
 	"strings"
 )
@@ -27,6 +26,28 @@ type parser struct {
 type nodeType int
 
 type parseStateFn func(*parser) parseStateFn
+
+type pos int
+
+func (p pos) Position() pos {
+	return p
+}
+
+type node interface {
+	Position() pos
+}
+
+type errorNode struct {
+	pos
+	err error
+}
+
+type importStatement struct {
+	pos
+	brace  bool
+	fnlist [][]string
+	pkg    string
+}
 
 func (p *parser) run() {
 	for state := parseTop; state != nil; {
@@ -135,30 +156,6 @@ func parseTop(p *parser) parseStateFn {
 	}
 }
 
-type pos int
-
-func (p pos) Position() pos {
-	return p
-}
-
-type node interface {
-	WriteTo(w io.Writer) (int64, error)
-}
-
-type errorNode struct {
-	node
-	pos
-	err error
-}
-
-func (node *errorNode) WriteTo(w io.Writer) (int64, error) {
-	return 0, node.err
-}
-
-type statement interface {
-	node
-}
-
 func parseImportStatement(p *parser) parseStateFn {
 	brace, fnlist, ok := parseImportFunctionList(p)
 	if !ok {
@@ -179,12 +176,7 @@ func parseImportStatement(p *parser) parseStateFn {
 		return nil
 	}
 
-	p.emit(&importStatement{
-		pos:    p.start,
-		brace:  brace,
-		fnlist: fnlist,
-		pkg:    pkg,
-	})
+	p.emit(&importStatement{p.start, brace, fnlist, pkg})
 	return parseTop
 }
 
@@ -275,41 +267,4 @@ func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 	}
 
 	return brace, fnlist, true
-}
-
-type importStatement struct {
-	statement
-	pos
-	brace  bool
-	fnlist [][]string
-	pkg    string
-}
-
-func (stmt *importStatement) WriteTo(w io.Writer) (int64, error) {
-	var builder strings.Builder
-	builder.WriteString("import ")
-	if stmt.brace {
-		builder.WriteString("{ ")
-	}
-	first := true
-	for _, pair := range stmt.fnlist {
-		if !first {
-			builder.WriteString(", ")
-		}
-		if pair[0] == pair[1] {
-			builder.WriteString(pair[0])
-		} else {
-			builder.WriteString(pair[0] + " as " + pair[1])
-		}
-		first = false
-	}
-	if stmt.brace {
-		builder.WriteString(" } ")
-	}
-	builder.WriteString(" from " + stmt.pkg + "\n")
-	return strings.NewReader(builder.String()).WriteTo(w)
-}
-
-type expr interface {
-	node
 }

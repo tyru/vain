@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -110,16 +111,18 @@ func transpile(dst io.Writer, src io.Reader, srcpath string) error {
 	if err != nil {
 		return err
 	}
+	dstbuf := bufio.NewWriter(dst)
 
 	done := make(chan bool, 1)
 	lexer := lex(srcpath, content.String())
 	parser := parse(lexer)
+	translator := translate(parser)
 	errs := make([]error, 0, 32)
 
-	// 3. output
+	// 4. Output
 	go func() {
-		for node := range parser.nodes {
-			_, err := node.WriteTo(dst)
+		for r := range translator.readers {
+			_, err := io.Copy(dstbuf, r)
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -127,12 +130,20 @@ func transpile(dst io.Writer, src io.Reader, srcpath string) error {
 		done <- true
 	}()
 
-	// 2. parser
+	// 3. Translate
+	go translator.run()
+
+	// 2. Parse
 	go parser.run()
 
-	// 1. lexer
+	// 1. Lex
 	go lexer.run()
 
 	<-done
+
+	err = dstbuf.Flush()
+	if err != nil {
+		errs = append(errs, err)
+	}
 	return multierror.Append(nil, errs...).ErrorOrNil()
 }
