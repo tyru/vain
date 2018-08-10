@@ -1,10 +1,9 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,8 +42,9 @@ COMMAND
 
 func build(args []string) error {
 	files := make(chan string, 32)
+	done := make(chan bool, 1)
 
-	// Transpile given files
+	// 2. files -> Transpile given files
 	transpileErrs := make([]error, 16)
 	go func() {
 		for src := range files {
@@ -55,23 +55,30 @@ func build(args []string) error {
 				transpileErrs = append(transpileErrs, err)
 			}
 		}
+
+		done <- true
 	}()
 
-	// Collect .vain files
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			close(files)
-			return err
-		}
-		if strings.HasSuffix(strings.ToLower(path), ".vain") {
-			files <- path
-		}
-		return nil
-	})
+	// 1. Collect .vain files -> files
+	var err error
+	go func() {
+		err = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if strings.HasSuffix(strings.ToLower(path), ".vain") {
+				files <- path
+			}
+			return nil
+		})
+		close(files)
+	}()
+
+	<-done
+
 	if err != nil {
 		return err
 	}
-
 	return multierror.Append(nil, transpileErrs...).ErrorOrNil()
 }
 
@@ -82,89 +89,50 @@ func transpileFile(dstpath, srcpath string) error {
 	}
 	defer src.Close()
 
-	dst, err := os.Create(dstpath)
+	tmpfile, err := ioutil.TempFile("", "example")
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
 
-	return transpile(bufio.NewWriter(dst), src, srcpath)
+	err = transpile(tmpfile, src, srcpath)
+	tmpfile.Close()
+	if err != nil {
+		os.Remove(tmpfile.Name())
+		return err
+	}
+
+	return os.Rename(tmpfile.Name(), dstpath)
 }
 
 func transpile(dst io.Writer, src io.Reader, srcpath string) error {
-	outCh := make(chan node, 32)
-	parser := newParser(outCh, src, srcpath)
+	var content strings.Builder
+	_, err := io.Copy(&content, src)
+	if err != nil {
+		return err
+	}
 
-	// parser goroutine
+	done := make(chan bool, 1)
+	lexer := lex(srcpath, content.String())
+	parser := parse(lexer)
+	errs := make([]error, 0, 32)
+
+	// 3. output
 	go func() {
-		// https://talks.golang.org/2011/lex.slide#26
-		for state := parseNode; state != nil; {
-			state = state(parser)
+		for node := range parser.nodes {
+			_, err := node.WriteTo(dst)
+			if err != nil {
+				errs = append(errs, err)
+			}
 		}
+		done <- true
 	}()
 
-	errs := make([]error, 0, 32)
-	for node := range outCh {
-		_, err := node.WriteTo(dst)
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
+	// 2. parser
+	go parser.run()
 
+	// 1. lexer
+	go lexer.run()
+
+	<-done
 	return multierror.Append(nil, errs...).ErrorOrNil()
-}
-
-func newParser(outCh chan<- node, src io.Reader, srcpath string) *parser {
-	return &parser{
-		outCh:    outCh,
-		reader:   bufio.NewReader(src),
-		filename: srcpath,
-	}
-}
-
-type parser struct {
-	outCh    chan<- node
-	reader   *bufio.Reader
-	filename string
-}
-
-func (p *parser) errorf(format string, args ...interface{}) stateFn {
-	p.outCh <- &nodeError{fmt.Errorf(format, args...)}
-	return nil
-}
-
-type stateFn func(*parser) stateFn
-
-func parseNode(p *parser) stateFn {
-	return p.errorf("parseNode failed")
-}
-
-type node interface {
-	WriteTo(w io.Writer) (int64, error)
-}
-
-type nodeError struct {
-	err error
-}
-
-func (node *nodeError) WriteTo(w io.Writer) (int64, error) {
-	return 0, node.err
-}
-
-type statement interface {
-	node
-}
-
-type importStatement struct {
-	statement
-}
-
-func (stmt *importStatement) WriteTo(w io.Writer) (int64, error) {
-	var builder bytes.Buffer
-	builder.WriteString("import hoge from fuga\n")
-	return builder.WriteTo(w)
-}
-
-type expr interface {
-	node
 }

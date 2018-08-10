@@ -1,0 +1,6 @@
+import echo from '$vim/ex'
+import echo, execute from '$vim/ex'
+import echo, execute as exe from '$vim/ex'
+import { echo } from '$vim/ex'
+import { echo, execute } from '$vim/ex'
+import { echo, execute as exe } from '$vim/ex'

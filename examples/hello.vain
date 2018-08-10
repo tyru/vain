@@ -1,2 +1,0 @@
-import ex from '$vim'
-ex.echo("hello")
