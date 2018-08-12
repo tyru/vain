@@ -56,3 +56,4 @@ func <autoload> (a: Int) {}
 (func (a: Int) {})
 (func <autoload> (a: Int) 42)
 (func <autoload> (a: Int) {})
+func func_with_type(): Int {}

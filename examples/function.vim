@@ -63,3 +63,5 @@ endfunction
 " 
 " {->42}
 " 
+function! s:func_with_type() abort
+endfunction

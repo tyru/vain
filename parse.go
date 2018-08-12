@@ -296,6 +296,7 @@ type funcStmtOrExpr struct {
 	mods       []string
 	name       string
 	args       []argument
+	retType    string
 	bodyIsStmt bool
 	body       []node
 }
@@ -316,6 +317,7 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 	var mods []string
 	var name string
 	var args []argument
+	var retType string
 	var bodyIsStmt bool
 	var body []node
 
@@ -336,7 +338,7 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 
 	// functionCallSignature
 	var ok bool
-	args, ok = acceptFunctionCallSignature(p)
+	args, retType, ok = acceptFunctionCallSignature(p)
 	if !ok {
 		return nil, false
 	}
@@ -365,7 +367,7 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 		body = append(body, expr)
 	}
 
-	f := &funcStmtOrExpr{p.start, isExpr, mods, name, args, bodyIsStmt, body}
+	f := &funcStmtOrExpr{p.start, isExpr, mods, name, args, retType, bodyIsStmt, body}
 	return f, true
 }
 
@@ -408,11 +410,11 @@ func acceptModifiers(p *parser) ([]string, bool) {
 	return mods, true
 }
 
-// functionCallSignature := "(" *LF *( functionArgument *LF "," *LF ) ")"
-func acceptFunctionCallSignature(p *parser) ([]argument, bool) {
+// functionCallSignature := "(" *LF *( functionArgument *LF "," *LF ) ")" [ ":" type ]
+func acceptFunctionCallSignature(p *parser) ([]argument, string, bool) {
 	if !p.accept(tokenPOpen) {
 		p.emitErrorf("")
-		return nil, false
+		return nil, "", false
 	}
 	p.acceptSpaces()
 
@@ -422,7 +424,7 @@ func acceptFunctionCallSignature(p *parser) ([]argument, bool) {
 		for {
 			arg, ok := acceptFunctionArgument(p)
 			if !ok {
-				return nil, false
+				return nil, "", false
 			}
 			args = append(args, *arg)
 			p.acceptSpaces()
@@ -437,7 +439,16 @@ func acceptFunctionCallSignature(p *parser) ([]argument, bool) {
 			p.acceptSpaces()
 		}
 	}
-	return args, true
+
+	var retType string
+	if p.accept(tokenColon) {
+		var ok bool
+		retType, ok = acceptType(p)
+		if !ok {
+			return nil, "", false
+		}
+	}
+	return args, retType, true
 }
 
 type argument struct {

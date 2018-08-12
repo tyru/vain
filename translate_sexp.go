@@ -202,6 +202,12 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		bodyList = append(bodyList, buf.String())
 	}
 
+	vs, err := unevalString(f.retType)
+	if err != nil {
+		return &errorReader{err}
+	}
+	retType, err := t.toJSONString(vs)
+
 	// TODO Check len(bodyList) == 1 when f.bodyIsStmt == false in analyzer.
 	var body string
 	if len(bodyList) > 0 {
@@ -212,11 +218,12 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 	if f.bodyIsStmt {
 		body = "(" + strings.Join(bodyList, " ") + ")"
 	}
-	s := fmt.Sprintf("%s(func (%s) %s (%s) %s)",
+	s := fmt.Sprintf("%s(func (%s) %s (%s) %s %s)",
 		t.getIndent(level),
 		strings.Join(f.mods, " "),
 		f.name,
 		strings.Join(args, " "),
+		retType,
 		body)
 	return strings.NewReader(s)
 }
