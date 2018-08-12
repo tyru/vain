@@ -127,8 +127,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newUnaryOpNodeReader(n, level, "+")
 	// case *sliceNode:
 	// 	return t.newSliceNodeReader(n, level)
-	// case *callNode:
-	// 	return t.newCallNodeReader(n, level)
+	case *callNode:
+		return t.newCallNodeReader(n, level)
 	case *subscriptNode:
 		return t.newBinaryOpNodeReader(n, level, "subscript")
 	case *dotNode:
@@ -267,6 +267,30 @@ func (t *sexpTranslator) newUnaryOpNodeReader(node unaryOpNode, level int, opstr
 		return &errorReader{err}
 	}
 	s := fmt.Sprintf("(%s %s)", opstr, value.String())
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newCallNodeReader(node *callNode, level int) io.Reader {
+	var left bytes.Buffer
+	_, err := io.Copy(&left, t.toReader(node.left, level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	rlist := make([]string, 0, len(node.rlist))
+	for i := range node.rlist {
+		var arg bytes.Buffer
+		_, err := io.Copy(&arg, t.toReader(node.rlist[i], level))
+		if err != nil {
+			return &errorReader{err}
+		}
+		rlist = append(rlist, arg.String())
+	}
+	var s string
+	if len(rlist) > 0 {
+		s = fmt.Sprintf("(call %s %s)", left.String(), strings.Join(rlist, " "))
+	} else {
+		s = fmt.Sprintf("(call %s)", left.String())
+	}
 	return strings.NewReader(s)
 }
 

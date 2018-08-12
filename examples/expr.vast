@@ -41,3 +41,7 @@
 (dot foo bar)
 (subscript foo bar)
 (subscript foo "bar")
+(call foo)
+(call (dot foo bar))
+(call (subscript foo bar))
+(call (subscript foo "bar"))
