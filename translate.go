@@ -139,16 +139,16 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newNumberNodeReader(n, level)
 	case *stringNode:
 		return t.newStringNodeReader(n, level)
-		// case *listNode:
-		// 	return t.newListNodeReader(n, level)
-		// case *dictionaryNode:
-		// 	return t.newDictionaryNodeReader(n, level)
-		// case *optionNode:
-		// 	return t.newOptionNodeReader(n, level)
-		// case *envNode:
-		// 	return t.newEnvNodeReader(n, level)
-		// case *regNode:
-		// 	return t.newRegNodeReader(n, level)
+	// case *listNode:
+	// 	return t.newListNodeReader(n, level)
+	// case *dictionaryNode:
+	// 	return t.newDictionaryNodeReader(n, level)
+	case *optionNode:
+		return t.newLiteralNodeReader(n, level, "option")
+	case *envNode:
+		return t.newLiteralNodeReader(n, level, "env")
+	case *regNode:
+		return t.newLiteralNodeReader(n, level, "reg")
 	}
 	return emptyReader
 }
@@ -281,6 +281,15 @@ func (t *sexpTranslator) newStringNodeReader(node *stringNode, level int) io.Rea
 		return &errorReader{err}
 	}
 	return strings.NewReader(value)
+}
+
+func (t *sexpTranslator) newLiteralNodeReader(node literalNode, level int, opstr string) io.Reader {
+	value, err := toSexp(node.Value(), "")
+	if err != nil {
+		return &errorReader{err}
+	}
+	s := fmt.Sprintf("(%s %s)", opstr, value)
+	return strings.NewReader(s)
 }
 
 func toSexp(v interface{}, defVal string) (string, error) {

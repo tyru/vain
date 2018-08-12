@@ -4,3 +4,10 @@
 "hel'lo"
 "hel\\nlo"
 "\u0008\u001b\u000c\n\r\t"
+(option "autoindent")
+(option "g:autoindent")
+(option "l:autoindent")
+(env "VAR")
+(reg "a")
+(reg "\"")
+(reg "")

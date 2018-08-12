@@ -1501,6 +1501,10 @@ func parseExpr8(p *parser) (expr, bool) {
 	return left, true
 }
 
+type literalNode interface {
+	Value() string
+}
+
 type numberNode struct {
 	Pos
 	value string
@@ -1526,14 +1530,26 @@ type optionNode struct {
 	value string
 }
 
+func (node *optionNode) Value() string {
+	return node.value[1:]
+}
+
 type envNode struct {
 	Pos
 	value string
 }
 
+func (node *envNode) Value() string {
+	return node.value[1:]
+}
+
 type regNode struct {
 	Pos
 	value string
+}
+
+func (node *regNode) Value() string {
+	return node.value[1:]
 }
 
 // expr9: number /
