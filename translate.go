@@ -138,8 +138,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newNumberNodeReader(n, level)
 	case *stringNode:
 		return t.newStringNodeReader(n, level)
-	// case *listNode:
-	// 	return t.newListNodeReader(n, level)
+	case *listNode:
+		return t.newListNodeReader(n, level)
 	// case *dictionaryNode:
 	// 	return t.newDictionaryNodeReader(n, level)
 	case *optionNode:
@@ -265,6 +265,20 @@ func (t *sexpTranslator) newLiteralNodeReader(node literalNode, level int, opstr
 		return &errorReader{err}
 	}
 	s := fmt.Sprintf("(%s %s)", opstr, value)
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newListNodeReader(node *listNode, level int) io.Reader {
+	args := make([]string, 0, len(node.value))
+	for i := range node.value {
+		var arg bytes.Buffer
+		_, err := io.Copy(&arg, t.toReader(node.value[i], level))
+		if err != nil {
+			return &errorReader{err}
+		}
+		args = append(args, arg.String())
+	}
+	s := "(list " + strings.Join(args, " ") + ")"
 	return strings.NewReader(s)
 }
 
