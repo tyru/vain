@@ -8,7 +8,7 @@ import (
 type vainString string
 
 func unevalString(s string) (*vainString, error) {
-	vs := vainString("\"" + s + "\"") // FIXME
+	vs := vainString("'" + strings.Replace(s, "'", "''", -1) + "'")
 	return &vs, nil
 }
 
