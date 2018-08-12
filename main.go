@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/go-multierror"
 )
@@ -43,21 +44,36 @@ COMMAND
 
 func build(args []string) error {
 	files := make(chan string, 32)
-	done := make(chan bool, 1)
+	var wg sync.WaitGroup
 
 	// 2. files -> Transpile given files
-	transpileErrs := make([]error, 16)
+	astErrs := make([]error, 16)
+	vimErrs := make([]error, 16)
+	wg.Add(1)
 	go func() {
 		for src := range files {
 			// file.vain -> file.vast
-			dst := src[:len(src)-len(".vain")] + ".vast"
-			err := transpileFile(dst, src)
-			if err != nil {
-				transpileErrs = append(transpileErrs, err)
-			}
+			wg.Add(1)
+			go func(src string) {
+				dst := src[:len(src)-len(".vain")] + ".vast"
+				err := transpileFile(dst, src, translateSexp)
+				if err != nil {
+					astErrs = append(astErrs, err)
+				}
+				wg.Done()
+			}(src)
+			// file.vain -> file.vim
+			wg.Add(1)
+			go func(src string) {
+				dst := src[:len(src)-len(".vain")] + ".vim"
+				err := transpileFile(dst, src, translateVim)
+				if err != nil {
+					vimErrs = append(vimErrs, err)
+				}
+				wg.Done()
+			}(src)
 		}
-
-		done <- true
+		wg.Done()
 	}()
 
 	// 1. Collect .vain files -> files
@@ -75,15 +91,17 @@ func build(args []string) error {
 		close(files)
 	}()
 
-	<-done
+	wg.Wait()
 
 	if err != nil {
 		return err
 	}
-	return multierror.Append(nil, transpileErrs...).ErrorOrNil()
+	e := multierror.Append(nil, astErrs...)
+	e = multierror.Append(e, vimErrs...)
+	return e.ErrorOrNil()
 }
 
-func transpileFile(dstpath, srcpath string) error {
+func transpileFile(dstpath, srcpath string, translate func(*parser) translator) error {
 	src, err := os.Open(srcpath)
 	if err != nil {
 		return err
@@ -95,7 +113,7 @@ func transpileFile(dstpath, srcpath string) error {
 		return err
 	}
 
-	err = transpile(tmpfile, src, srcpath)
+	err = transpile(tmpfile, src, srcpath, translate)
 	tmpfile.Close()
 	if err != nil {
 		os.Remove(tmpfile.Name())
@@ -105,7 +123,7 @@ func transpileFile(dstpath, srcpath string) error {
 	return os.Rename(tmpfile.Name(), dstpath)
 }
 
-func transpile(dst io.Writer, src io.Reader, srcpath string) error {
+func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*parser) translator) error {
 	var content strings.Builder
 	_, err := io.Copy(&content, src)
 	if err != nil {
@@ -116,7 +134,7 @@ func transpile(dst io.Writer, src io.Reader, srcpath string) error {
 	done := make(chan bool, 1)
 	lexer := lex(srcpath, content.String())
 	parser := parse(lexer)
-	translator := translateSexp(parser)
+	translator := translate(parser)
 	errs := make([]error, 0, 32)
 
 	// 4. Output

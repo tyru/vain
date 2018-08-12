@@ -1,0 +1,13 @@
+" 42
+" "string"
+" 'str''ing'
+" "hel'lo"
+" 'hel\nlo'
+" "\b\e\f\n\r\t"
+" &autoindent
+" &g:autoindent
+" &l:autoindent
+" $VAR
+" @a
+" @"
+" @
