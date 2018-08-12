@@ -42,6 +42,7 @@ type tokenType int
 const (
 	tokenError tokenType = iota // error occurred; value is text of error
 	tokenEOF
+	tokenNewline
 	tokenIdentifier
 	tokenComma
 	tokenEqual
@@ -171,16 +172,22 @@ func (l *lexer) ignoreRun(valid string) {
 	l.ignore()
 }
 
-// ignoreSpaces skips over the pending input before this point.
-func (l *lexer) ignoreSpaces() rune {
+// acceptSpaces skips over the pending input before this point.
+func (l *lexer) acceptSpaces() rune {
 	l.acceptRun(" \t\r\n")
-	l.ignore()
 	r := l.next()
 	if r == eof {
 		return eof
 	}
 	l.backup()
 	return r
+}
+
+func (l *lexer) emitNewlines() {
+	n := strings.Count(l.input[l.start:l.pos], "\n")
+	for i := 0; i < n; i++ {
+		l.emit(tokenNewline)
+	}
 }
 
 // backup steps back one rune.
@@ -311,10 +318,12 @@ func isAlphaNumeric(r rune) bool {
 }
 
 func lexTop(l *lexer) lexStateFn {
-	if l.ignoreSpaces() == eof {
+	if l.acceptSpaces() == eof {
 		l.emit(tokenEOF)
 		return nil
 	}
+	l.emitNewlines()
+	l.ignore()
 
 	if l.acceptBy(isNumeric) {
 		l.backup()
