@@ -188,7 +188,7 @@ func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level i
 		return &errorReader{err}
 	}
 
-	s := fmt.Sprintf("%s(import %v %v %v)", t.getIndent(level), stmt.brace, fnlist, pkg)
+	s := fmt.Sprintf("%s(import %v %s %s)", t.getIndent(level), stmt.brace, fnlist, pkg)
 	return strings.NewReader(s)
 }
 
@@ -210,7 +210,7 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		return &errorReader{err}
 	}
 
-	s := fmt.Sprintf("%s(func %v %v %v %v %v)", t.getIndent(level), mods, name, args, f.bodyIsStmt, body)
+	s := fmt.Sprintf("%s(func %s %s %s %v %s)", t.getIndent(level), mods, name, args, f.bodyIsStmt, body)
 	return strings.NewReader(s)
 }
 
@@ -231,7 +231,7 @@ func (t *sexpTranslator) newTernaryNodeReader(node *ternaryNode, level int) io.R
 		if err != nil {
 			return nil, int(n), err
 		}
-		s := fmt.Sprintf("(?: %v %v %v)", cond.String(), left.String(), right.String())
+		s := fmt.Sprintf("(?: %s %s %s)", cond.String(), left.String(), right.String())
 		r := strings.NewReader(s)
 		return r, 0, nil
 	}}
