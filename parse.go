@@ -99,19 +99,18 @@ func (p *parser) tokenError() {
 
 // next returns the next token in the input.
 func (p *parser) next() *token {
-	var t *token
+	var t token
 	if len(p.tokbuf) > 0 {
-		t = &p.tokbuf[len(p.tokbuf)-1]
+		t = p.tokbuf[len(p.tokbuf)-1]
 		p.tokbuf = p.tokbuf[:len(p.tokbuf)-1]
 	} else {
-		tt := <-p.lexer.tokens
-		t = &tt
+		t = <-p.lexer.tokens
 	}
-	p.token = t
+	p.token = &t
 	if p.start < 0 {
 		p.start = Pos(t.pos)
 	}
-	return t
+	return &t
 }
 
 func (p *parser) backup(t *token) {
