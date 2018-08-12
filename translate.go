@@ -295,7 +295,7 @@ func (t *sexpTranslator) newCallNodeReader(node *callNode, level int) io.Reader 
 }
 
 func (t *sexpTranslator) newIdentifierNodeReader(node *identifierNode, level int) io.Reader {
-	return strings.NewReader(node.value)
+	return strings.NewReader("'" + node.value)
 }
 
 func (t *sexpTranslator) newNumberNodeReader(node *numberNode, level int) io.Reader {
