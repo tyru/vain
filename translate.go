@@ -44,6 +44,7 @@ func (t *sexpTranslator) getIndent(level int) string {
 }
 
 func (t *sexpTranslator) toReader(node node, level int) io.Reader {
+	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
 	switch n := node.(type) {
 	case *errorNode:
 		return &errorReader{n.err}
