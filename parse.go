@@ -459,10 +459,24 @@ func parseExpr1(p *parser) (expr, bool) {
 	return left, true
 }
 
+type binaryOpNode interface {
+	Left() node
+	Right() node
+}
+
 type orNode struct {
 	Pos
+	binaryOpNode
 	left  expr
 	right expr
+}
+
+func (node *orNode) Left() node {
+	return node.left
+}
+
+func (node *orNode) Right() node {
+	return node.right
 }
 
 // expr2 := expr3 *( "||" expr3 )
@@ -491,8 +505,17 @@ func parseExpr2(p *parser) (expr, bool) {
 
 type andNode struct {
 	Pos
+	binaryOpNode
 	left  expr
 	right expr
+}
+
+func (node *andNode) Left() node {
+	return node.left
+}
+
+func (node *andNode) Right() node {
+	return node.right
 }
 
 // expr3 := expr4 *( "&&" expr4 )
