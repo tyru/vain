@@ -269,7 +269,8 @@ func (t *sexpTranslator) newLiteralNodeReader(node literalNode, level int, opstr
 }
 
 func (t *sexpTranslator) newListNodeReader(node *listNode, level int) io.Reader {
-	args := make([]string, 0, len(node.value))
+	args := make([]string, 0, len(node.value)+1)
+	args = append(args, "list")
 	for i := range node.value {
 		var arg bytes.Buffer
 		_, err := io.Copy(&arg, t.toReader(node.value[i], level))
@@ -278,7 +279,7 @@ func (t *sexpTranslator) newListNodeReader(node *listNode, level int) io.Reader 
 		}
 		args = append(args, arg.String())
 	}
-	s := "(list " + strings.Join(args, " ") + ")"
+	s := "(" + strings.Join(args, " ") + ")"
 	return strings.NewReader(s)
 }
 
