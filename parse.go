@@ -114,16 +114,6 @@ func (p *parser) next() *token {
 	return t
 }
 
-// nextNosp returns the next token in the input.
-// This skips tokenNewline.
-func (p *parser) nextNosp() *token {
-	for {
-		if t := p.next(); t.typ != tokenNewline {
-			return t
-		}
-	}
-}
-
 func (p *parser) backup(t *token) {
 	p.tokbuf = append(p.tokbuf, *t)
 }
@@ -136,15 +126,7 @@ func (p *parser) peek() *token {
 	return t
 }
 
-// peekNosp returns but does not consume
-// the next token in the input.
-// This skips tokenNewline.
-func (p *parser) peekNosp() *token {
-	t := p.next()
-	p.backup(t)
-	return t
-}
-
+// accept consumes the next token if its type is typ.
 func (p *parser) accept(typ tokenType) bool {
 	t := p.next()
 	if t.typ == typ {
@@ -154,12 +136,13 @@ func (p *parser) accept(typ tokenType) bool {
 	return false
 }
 
-func (p *parser) acceptNosp(typ tokenType) bool {
-	t := p.nextNosp()
-	if t.typ == typ {
+// acceptSpaces accepts 1*LF .
+func (p *parser) acceptSpaces() bool {
+	if p.accept(tokenNewline) {
+		for p.accept(tokenNewline) {
+		}
 		return true
 	}
-	p.backup(t)
 	return false
 }
 
@@ -186,23 +169,25 @@ func parseTopLevel(p *parser) (*topLevelNode, bool) {
 	}
 }
 
+// statementOrExpression
 func parseStmtOrExpr(p *parser) (node, bool) {
-	if p.acceptNosp(tokenEOF) {
+	p.acceptSpaces()
+	if p.accept(tokenEOF) {
 		return nil, false
 	}
-	if p.acceptNosp(tokenError) {
+	if p.accept(tokenError) {
 		p.tokenError()
 		return nil, false
 	}
 
 	// Statement
-	if p.acceptNosp(tokenImport) {
+	if p.accept(tokenImport) {
 		p.backup(p.token)
 		return parseImportStatement(p)
 	}
-	if p.acceptNosp(tokenFunc) {
+	if p.accept(tokenFunc) {
 		p.backup(p.token)
-		return parseFunc(p)
+		return acceptFunction(p)
 	}
 
 	// Expression
@@ -216,8 +201,9 @@ type importStatement struct {
 	pkg    vainString
 }
 
+// importStatement := "import" <importFunctionList> "from" string
 func parseImportStatement(p *parser) (*importStatement, bool) {
-	if !p.acceptNosp(tokenImport) {
+	if !p.accept(tokenImport) {
 		p.emitErrorf("")
 		return nil, false
 	}
@@ -227,12 +213,12 @@ func parseImportStatement(p *parser) (*importStatement, bool) {
 		return nil, false
 	}
 
-	if !p.acceptNosp(tokenFrom) {
+	if !p.accept(tokenFrom) {
 		p.emitErrorf("")
 		return nil, false
 	}
 
-	if !p.acceptNosp(tokenString) {
+	if !p.accept(tokenString) {
 		p.emitErrorf("")
 		return nil, false
 	}
@@ -242,27 +228,29 @@ func parseImportStatement(p *parser) (*importStatement, bool) {
 	return stmt, true
 }
 
-// import { <import function> } from 'pkg'
-// import { <import function>, <import function> } from 'pkg'
-// import <import function> from 'pkg'
-// import <import function> as foo from 'pkg'
+// importFunctionList = "{" *LF importFunctionListBody *LF "}" / importFunctionListBody
+// importFunctionListBody := importFunctionListItem *( *LF "," *LF importFunctionListItem )
+// importFunctionListItem := ( identifier | "*" ) [ "as" *LF identifier ]
 func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 	var brace bool
-	if p.acceptNosp(tokenCOpen) {
+	if p.accept(tokenCOpen) {
 		brace = true
+		p.acceptSpaces()
 	}
 
+	// importFunctionListBody
 	fnlist := make([][]string, 0, 1)
 	for {
-		if !p.acceptNosp(tokenIdentifier) && !p.acceptNosp(tokenStar) {
+		if !p.accept(tokenIdentifier) && !p.accept(tokenStar) {
 			p.emitErrorf("")
 			return false, nil, false
 		}
 		orig := p.token.val
 		to := orig
 
-		if p.acceptNosp(tokenAs) {
-			if !p.acceptNosp(tokenIdentifier) && !p.acceptNosp(tokenStar) {
+		if p.accept(tokenAs) {
+			p.acceptSpaces()
+			if !p.accept(tokenIdentifier) {
 				p.emitErrorf("")
 				return false, nil, false
 			}
@@ -270,19 +258,15 @@ func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 		}
 		fnlist = append(fnlist, []string{orig, to})
 
-		if brace && p.acceptNosp(tokenCClose) {
+		p.acceptSpaces()
+		if !p.accept(tokenComma) {
 			break
 		}
-		if p.acceptNosp(tokenFrom) {
-			p.backup(p.token)
-			break
-		}
-		if p.acceptNosp(tokenComma) {
-			continue
-		}
+		p.acceptSpaces()
+	}
 
-		p.emitErrorf("unexpected token %+v in import statement", p.token.val)
-		return false, nil, false
+	if brace && !p.accept(tokenCClose) {
+		p.emitErrorf("")
 	}
 
 	return brace, fnlist, true
@@ -297,8 +281,11 @@ type funcStmtOrExpr struct {
 	body       []node
 }
 
-func parseFunc(p *parser) (*funcStmtOrExpr, bool) {
-	if !p.acceptNosp(tokenFunc) {
+// function :=
+//        "func" [ functionModifiers ] [ identifier ] functionCallSignature expr1 /
+//        "func" [ functionModifiers ] [ identifier ] functionCallSignature "{" *LF *( statementOrExpression *LF ) "}" /
+func acceptFunction(p *parser) (*funcStmtOrExpr, bool) {
+	if !p.accept(tokenFunc) {
 		p.emitErrorf("")
 		return nil, false
 	}
@@ -310,32 +297,34 @@ func parseFunc(p *parser) (*funcStmtOrExpr, bool) {
 	var body []node
 
 	// Modifiers
-	if p.acceptNosp(tokenLt) {
+	if p.accept(tokenLt) {
 		p.backup(p.token)
 		var ok bool
-		mods, ok = parseModifiers(p)
+		mods, ok = acceptModifiers(p)
 		if !ok {
 			return nil, false
 		}
 	}
 
-	// Function name (if empty, this is functionExpression not functionStatement)
-	if p.acceptNosp(tokenIdentifier) {
+	// Function name (if empty, this is an expression not a statement)
+	if p.accept(tokenIdentifier) {
 		name = p.token.val
 	}
 
+	// functionCallSignature
 	var ok bool
-	args, ok = parseCallSignature(p)
+	args, ok = acceptFunctionCallSignature(p)
 	if !ok {
 		return nil, false
 	}
 
 	// Body
 	body = make([]node, 0, 32)
-	if p.acceptNosp(tokenCOpen) {
+	if p.accept(tokenCOpen) {
 		bodyIsStmt = true
+		p.acceptSpaces()
 		for {
-			if p.acceptNosp(tokenCClose) {
+			if p.accept(tokenCClose) {
 				break
 			}
 			node, ok := parseStmtOrExpr(p)
@@ -343,6 +332,7 @@ func parseFunc(p *parser) (*funcStmtOrExpr, bool) {
 				return nil, false
 			}
 			body = append(body, node)
+			p.acceptSpaces()
 		}
 	} else {
 		expr, ok := parseExpr(p)
@@ -356,50 +346,57 @@ func parseFunc(p *parser) (*funcStmtOrExpr, bool) {
 	return f, true
 }
 
-func parseModifiers(p *parser) ([]string, bool) {
-	if !p.acceptNosp(tokenLt) {
+// functionModifiers := "<" *LF identifier *( *LF "," *LF identifier ) *LF ">"
+func acceptModifiers(p *parser) ([]string, bool) {
+	if !p.accept(tokenLt) {
 		p.emitErrorf("")
 		return nil, false
 	}
 	mods := make([]string, 0, 8)
+	p.acceptSpaces()
 	for {
-		if !p.acceptNosp(tokenIdentifier) {
+		if !p.accept(tokenIdentifier) {
 			p.emitErrorf("")
 			return nil, false
 		}
 		mods = append(mods, p.token.val)
-		if p.acceptNosp(tokenComma) {
-			continue
-		}
-		if p.acceptNosp(tokenGt) {
+		p.acceptSpaces()
+		if p.accept(tokenComma) {
+			p.acceptSpaces()
+			if p.accept(tokenGt) {
+				break
+			}
+		} else if p.accept(tokenGt) {
 			break
 		}
-		p.emitErrorf("")
-		return nil, false
 	}
 	return mods, true
 }
 
-func parseCallSignature(p *parser) ([]argument, bool) {
-	var args []argument
-
-	if !p.acceptNosp(tokenPOpen) {
+// functionCallSignature := "(" *LF *( functionArgument *LF "," *LF ) ")"
+func acceptFunctionCallSignature(p *parser) ([]argument, bool) {
+	if !p.accept(tokenPOpen) {
 		p.emitErrorf("")
 		return nil, false
 	}
+	p.acceptSpaces()
+
+	args := make([]argument, 0, 8)
 	for {
-		if p.acceptNosp(tokenPClose) {
+		if p.accept(tokenPClose) {
 			break
 		}
-		arg, ok := parseArgument(p)
+		arg, ok := acceptFunctionArgument(p)
 		if !ok {
 			return nil, false
 		}
 		args = append(args, *arg)
-		if !p.acceptNosp(tokenComma) {
+		p.acceptSpaces()
+		if !p.accept(tokenComma) {
 			p.emitErrorf("")
 			return nil, false
 		}
+		p.acceptSpaces()
 	}
 	return args, true
 }
@@ -410,29 +407,29 @@ type argument struct {
 	defaultVal expr
 }
 
-// argument := identifier ":" type /
-//             identifier "=" expr
-func parseArgument(p *parser) (*argument, bool) {
+// functionArgument := identifier *LF ":" *LF type /
+//                     identifier *LF "=" *LF expr
+func acceptFunctionArgument(p *parser) (*argument, bool) {
 	var name string
 	var typ string
 
-	if !p.acceptNosp(tokenIdentifier) {
+	if !p.accept(tokenIdentifier) {
 		p.emitErrorf("")
 		return nil, false
 	}
 	name = p.token.val
 
-	if p.acceptNosp(tokenColon) {
+	p.acceptSpaces()
+	if p.accept(tokenColon) {
+		p.acceptSpaces()
 		var ok bool
-		typ, ok = parseType(p)
+		typ, ok = acceptType(p)
 		if !ok {
 			return nil, false
 		}
 		return &argument{name, typ, nil}, true
-	}
-
-	// name = defaultValue
-	if p.acceptNosp(tokenEqual) {
+	} else if p.accept(tokenEqual) {
+		p.acceptSpaces()
 		expr, ok := parseExpr(p)
 		if !ok {
 			return nil, false
@@ -445,8 +442,9 @@ func parseArgument(p *parser) (*argument, bool) {
 }
 
 // TODO: Complex type like array, dictionary, generics...
-func parseType(p *parser) (string, bool) {
-	if !p.acceptNosp(tokenIdentifier) {
+// type := identifier
+func acceptType(p *parser) (string, bool) {
+	if !p.accept(tokenIdentifier) {
 		p.emitErrorf("")
 		return "", false
 	}
@@ -464,13 +462,13 @@ type ternaryNode struct {
 	right expr
 }
 
-// expr1 := expr2 [ "?" expr1 ":" expr1 ]
+// expr1 := expr2 [ "?" expr1 *LF ":" expr1 ]
 func parseExpr1(p *parser) (expr, bool) {
 	left, ok := parseExpr2(p)
 	if !ok {
 		return nil, false
 	}
-	if p.acceptNosp(tokenQuestion) {
+	if p.accept(tokenQuestion) {
 		node := &ternaryNode{}
 		node.cond = left
 		expr, ok := parseExpr1(p)
@@ -478,7 +476,8 @@ func parseExpr1(p *parser) (expr, bool) {
 			return nil, false
 		}
 		node.left = expr
-		if !p.acceptNosp(tokenColon) {
+		p.acceptSpaces()
+		if !p.accept(tokenColon) {
 			p.emitErrorf("")
 			return nil, false
 		}
@@ -511,17 +510,18 @@ func (node *orNode) Right() node {
 	return node.right
 }
 
-// expr2 := expr3 *( "||" expr3 )
+// expr2 := expr3 *( "||" *LF expr3 )
 func parseExpr2(p *parser) (expr, bool) {
 	left, ok := parseExpr3(p)
 	if !ok {
 		return nil, false
 	}
 	for {
-		if p.acceptNosp(tokenOrOr) {
+		if p.accept(tokenOrOr) {
 			node := &orNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr3(p)
 			if !ok {
 				return nil, false
@@ -549,17 +549,18 @@ func (node *andNode) Right() node {
 	return node.right
 }
 
-// expr3 := expr4 *( "&&" expr4 )
+// expr3 := expr4 *( "&&" *LF expr4 )
 func parseExpr3(p *parser) (expr, bool) {
 	left, ok := parseExpr4(p)
 	if !ok {
 		return nil, false
 	}
 	for {
-		if p.acceptNosp(tokenAndAnd) {
+		if p.accept(tokenAndAnd) {
 			node := &andNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr4(p)
 			if !ok {
 				return nil, false
@@ -853,226 +854,246 @@ func (node *isNotCiNode) Right() node {
 	return node.right
 }
 
-// expr4 := expr5 "=="  expr5 /
-//          expr5 "==?" expr5 /
-//          expr5 "!="  expr5 /
-//          expr5 "!=?" expr5 /
-//          expr5 ">"   expr5 /
-//          expr5 ">?"  expr5 /
-//          expr5 ">="  expr5 /
-//          expr5 ">=?" expr5 /
-//          expr5 "<"   expr5 /
-//          expr5 "<?"  expr5 /
-//          expr5 "<="  expr5 /
-//          expr5 "<=?" expr5 /
-//          expr5 "=~"  expr5 /
-//          expr5 "=~?" expr5 /
-//          expr5 "!~"  expr5 /
-//          expr5 "!~?" expr5 /
-//          expr5 "is"  expr5 /
-//          expr5 "is?" expr5 /
-//          expr5 "isnot"  expr5 /
-//          expr5 "isnot?" expr5 /
+// expr4 := expr5 "=="  *LF expr5 /
+//          expr5 "==?" *LF expr5 /
+//          expr5 "!="  *LF expr5 /
+//          expr5 "!=?" *LF expr5 /
+//          expr5 ">"   *LF expr5 /
+//          expr5 ">?"  *LF expr5 /
+//          expr5 ">="  *LF expr5 /
+//          expr5 ">=?" *LF expr5 /
+//          expr5 "<"   *LF expr5 /
+//          expr5 "<?"  *LF expr5 /
+//          expr5 "<="  *LF expr5 /
+//          expr5 "<=?" *LF expr5 /
+//          expr5 "=~"  *LF expr5 /
+//          expr5 "=~?" *LF expr5 /
+//          expr5 "!~"  *LF expr5 /
+//          expr5 "!~?" *LF expr5 /
+//          expr5 "is"  *LF expr5 /
+//          expr5 "is?" *LF expr5 /
+//          expr5 "isnot"  *LF expr5 /
+//          expr5 "isnot?" *LF expr5 /
 //          expr5
 func parseExpr4(p *parser) (expr, bool) {
 	left, ok := parseExpr5(p)
 	if !ok {
 		return nil, false
 	}
-	if p.acceptNosp(tokenEqEq) {
+	if p.accept(tokenEqEq) {
 		node := &equalNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenEqEqCi) {
+	} else if p.accept(tokenEqEqCi) {
 		node := &equalCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenNeq) {
+	} else if p.accept(tokenNeq) {
 		node := &nequalNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenNeqCi) {
+	} else if p.accept(tokenNeqCi) {
 		node := &nequalCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenGt) {
+	} else if p.accept(tokenGt) {
 		node := &greaterNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenGtCi) {
+	} else if p.accept(tokenGtCi) {
 		node := &greaterCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenGtEq) {
+	} else if p.accept(tokenGtEq) {
 		node := &gequalNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenGtEqCi) {
+	} else if p.accept(tokenGtEqCi) {
 		node := &gequalCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenLt) {
+	} else if p.accept(tokenLt) {
 		node := &smallerNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenLtCi) {
+	} else if p.accept(tokenLtCi) {
 		node := &smallerCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenLtEq) {
+	} else if p.accept(tokenLtEq) {
 		node := &sequalNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenLtEqCi) {
+	} else if p.accept(tokenLtEqCi) {
 		node := &sequalCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenMatch) {
+	} else if p.accept(tokenMatch) {
 		node := &matchNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenMatchCi) {
+	} else if p.accept(tokenMatchCi) {
 		node := &matchCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenNoMatch) {
+	} else if p.accept(tokenNoMatch) {
 		node := &noMatchNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenNoMatchCi) {
+	} else if p.accept(tokenNoMatchCi) {
 		node := &noMatchCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenIs) {
+	} else if p.accept(tokenIs) {
 		node := &isNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenIsCi) {
+	} else if p.accept(tokenIsCi) {
 		node := &isCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenIsNot) {
+	} else if p.accept(tokenIsNot) {
 		node := &isNotNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
 		}
 		node.right = right
 		left = node
-	} else if p.acceptNosp(tokenIsNotCi) {
+	} else if p.accept(tokenIsNotCi) {
 		node := &isNotCiNode{}
 		node.Pos = p.token.pos
 		node.left = left
+		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
 			return nil, false
@@ -1111,8 +1132,8 @@ func (node *subtractNode) Right() node {
 	return node.right
 }
 
-// expr5 := expr6 1*( "+" expr6 ) /
-//          expr6 1*( "-" expr6 ) /
+// expr5 := expr6 1*( "+" *LF expr6 ) /
+//          expr6 1*( "-" *LF expr6 ) /
 //          expr6
 func parseExpr5(p *parser) (expr, bool) {
 	left, ok := parseExpr6(p)
@@ -1120,20 +1141,22 @@ func parseExpr5(p *parser) (expr, bool) {
 		return nil, false
 	}
 	for {
-		if p.acceptNosp(tokenPlus) {
+		if p.accept(tokenPlus) {
 			node := &addNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr6(p)
 			if !ok {
 				return nil, false
 			}
 			node.right = right
 			left = node
-		} else if p.acceptNosp(tokenMinus) {
+		} else if p.accept(tokenMinus) {
 			node := &subtractNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr6(p)
 			if !ok {
 				return nil, false
@@ -1189,9 +1212,9 @@ func (node *remainderNode) Right() node {
 	return node.right
 }
 
-// expr6 := expr7 1*( "*" expr7 ) /
-//          expr7 1*( "/" expr7 ) /
-//          expr7 1*( "%" expr7 ) /
+// expr6 := expr7 1*( "*" *LF expr7 ) /
+//          expr7 1*( "/" *LF expr7 ) /
+//          expr7 1*( "%" *LF expr7 ) /
 //          expr7
 func parseExpr6(p *parser) (expr, bool) {
 	left, ok := parseExpr7(p)
@@ -1199,30 +1222,33 @@ func parseExpr6(p *parser) (expr, bool) {
 		return nil, false
 	}
 	for {
-		if p.acceptNosp(tokenStar) {
+		if p.accept(tokenStar) {
 			node := &multiplyNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr7(p)
 			if !ok {
 				return nil, false
 			}
 			node.right = right
 			left = node
-		} else if p.acceptNosp(tokenSlash) {
+		} else if p.accept(tokenSlash) {
 			node := &divideNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr7(p)
 			if !ok {
 				return nil, false
 			}
 			node.right = right
 			left = node
-		} else if p.acceptNosp(tokenPercent) {
+		} else if p.accept(tokenPercent) {
 			node := &remainderNode{}
 			node.Pos = p.token.pos
 			node.left = left
+			p.acceptSpaces()
 			right, ok := parseExpr7(p)
 			if !ok {
 				return nil, false
@@ -1272,7 +1298,7 @@ func (node *plusNode) Value() node {
 //          "+" expr7 /
 //          expr8
 func parseExpr7(p *parser) (expr, bool) {
-	if p.acceptNosp(tokenNot) {
+	if p.accept(tokenNot) {
 		node := &notNode{}
 		node.Pos = p.token.pos
 		left, ok := parseExpr7(p)
@@ -1281,7 +1307,7 @@ func parseExpr7(p *parser) (expr, bool) {
 		}
 		node.left = left
 		return node, true
-	} else if p.acceptNosp(tokenMinus) {
+	} else if p.accept(tokenMinus) {
 		node := &minusNode{}
 		node.Pos = p.token.pos
 		left, ok := parseExpr7(p)
@@ -1290,7 +1316,7 @@ func parseExpr7(p *parser) (expr, bool) {
 		}
 		node.left = left
 		return node, true
-	} else if p.acceptNosp(tokenPlus) {
+	} else if p.accept(tokenPlus) {
 		node := &plusNode{}
 		node.Pos = p.token.pos
 		left, ok := parseExpr7(p)
@@ -1353,10 +1379,10 @@ type identifierNode struct {
 	value string
 }
 
-// expr8 := expr9 1*( "[" expr1 "]" ) /
-//          expr9 1*( "[" expr1 ":" expr1 "]" ) /
-//          expr9 1*( "." identifier ) /
-//          expr9 1*( "(" [ expr1 *( "," expr1) [ "," ] ] ")" ) /
+// expr8 := expr9 1*( "[" *LF expr1 *LF "]" ) /
+//          expr9 1*( "[" *LF [ expr1 ] *LF ":" *LF [ expr1 ] *LF "]" ) /
+//          expr9 1*( "." *LF identifier ) /
+//          expr9 1*( "(" *LF [ expr1 *LF *( "," *LF expr1 *LF) [ "," ] ] *LF ")" ) /
 //          expr9
 func parseExpr8(p *parser) (expr, bool) {
 	left, ok := parseExpr9(p)
@@ -1366,19 +1392,21 @@ func parseExpr8(p *parser) (expr, bool) {
 	for {
 		if p.accept(tokenSqOpen) {
 			npos := p.token.pos
-			if p.acceptNosp(tokenColon) {
+			p.acceptSpaces()
+			if p.accept(tokenColon) {
 				node := &sliceNode{}
 				node.Pos = npos
 				node.left = left
 				node.rlist = []expr{nil, nil}
-				if p.peekNosp().typ != tokenSqClose {
+				p.acceptSpaces()
+				if p.peek().typ != tokenSqClose {
 					expr, ok := parseExpr1(p)
 					if !ok {
 						return nil, false
 					}
 					node.rlist[1] = expr
 				}
-				if !p.acceptNosp(tokenSqClose) {
+				if !p.accept(tokenSqClose) {
 					p.emitErrorf("")
 					return nil, false
 				}
@@ -1388,19 +1416,21 @@ func parseExpr8(p *parser) (expr, bool) {
 				if !ok {
 					return nil, false
 				}
-				if p.acceptNosp(tokenColon) {
+				p.acceptSpaces()
+				if p.accept(tokenColon) {
 					node := &sliceNode{}
 					node.Pos = npos
 					node.left = left
 					node.rlist = []expr{right, nil}
-					if p.peekNosp().typ != tokenSqClose {
+					p.acceptSpaces()
+					if p.peek().typ != tokenSqClose {
 						expr, ok := parseExpr1(p)
 						if !ok {
 							return nil, false
 						}
 						node.rlist[1] = expr
 					}
-					if !p.acceptNosp(tokenSqClose) {
+					if !p.accept(tokenSqClose) {
 						p.emitErrorf("")
 						return nil, false
 					}
@@ -1410,7 +1440,8 @@ func parseExpr8(p *parser) (expr, bool) {
 					node.Pos = npos
 					node.left = left
 					node.right = right
-					if p.acceptNosp(tokenSqClose) {
+					p.acceptSpaces()
+					if p.accept(tokenSqClose) {
 						p.emitErrorf("")
 						return nil, false
 					}
@@ -1423,18 +1454,21 @@ func parseExpr8(p *parser) (expr, bool) {
 			node.Pos = p.token.pos
 			node.left = left
 			node.rlist = make([]expr, 8)
-			if !p.acceptNosp(tokenPClose) {
+			p.acceptSpaces()
+			if !p.accept(tokenPClose) {
 				for {
 					arg, ok := parseExpr1(p)
 					if !ok {
 						return nil, false
 					}
 					node.rlist = append(node.rlist, arg)
-					if p.acceptNosp(tokenComma) {
-						if p.acceptNosp(tokenPClose) {
+					p.acceptSpaces()
+					if p.accept(tokenComma) {
+						p.acceptSpaces()
+						if p.accept(tokenPClose) {
 							break
 						}
-					} else if p.acceptNosp(tokenPClose) {
+					} else if p.accept(tokenPClose) {
 						break
 					} else {
 						p.emitErrorf("")
@@ -1446,7 +1480,8 @@ func parseExpr8(p *parser) (expr, bool) {
 
 		} else if p.accept(tokenDot) {
 			dot := p.token
-			if !p.acceptNosp(tokenIdentifier) {
+			p.acceptSpaces()
+			if !p.accept(tokenIdentifier) {
 				p.emitErrorf("")
 				return nil, false
 			}
@@ -1497,49 +1532,49 @@ type regNode struct {
 	value string
 }
 
-// expr9: number
-//        "string"
-//        'string'
-//        [expr1, ...]
-//        {expr1: expr1, ...}
-//        &option
-//        (expr1)
-//        func (arg: typ, ...) expr1
-//        func (arg: typ, ...) { statementOrExpression }
-//        func name(arg: typ, ...) expr1
-//        func name(arg: typ, ...) { statementOrExpression }
-//        variable
-//        $VAR
+// expr9: number /
+//        (string ABNF is too complex! e.g. "string\n", 'str''ing') /
+//        "[" *LF *( expr1 *LF "," *LF ) "]" /
+//        "{" *LF *( ( identifier | expr1 ) *LF ":" *LF expr1 *LF "," *LF ) "}" /
+//        &option /
+//        "(" *LF expr1 *LF ")" /
+//        function /
+//        identifier /
+//        identifierLike /
+//        $VAR /
 //        @r
 func parseExpr9(p *parser) (expr, bool) {
-	if p.acceptNosp(tokenNumber) {
+	if p.accept(tokenNumber) {
 		node := &numberNode{}
 		node.Pos = p.token.pos
 		node.value = p.token.val
 		return node, true
 
-	} else if p.acceptNosp(tokenString) {
+	} else if p.accept(tokenString) {
 		node := &stringNode{}
 		node.Pos = p.token.pos
 		node.value = vainString(p.token.val)
 		return node, true
 
-	} else if p.acceptNosp(tokenSqOpen) {
+	} else if p.accept(tokenSqOpen) {
 		node := &listNode{}
 		node.Pos = p.token.pos
 		node.value = make([]expr, 0, 16)
-		if !p.acceptNosp(tokenSqClose) {
+		p.acceptSpaces()
+		if !p.accept(tokenSqClose) {
 			for {
 				expr, ok := parseExpr1(p)
 				if !ok {
 					return nil, false
 				}
 				node.value = append(node.value, expr)
-				if p.acceptNosp(tokenComma) {
-					if p.acceptNosp(tokenSqClose) {
+				p.acceptSpaces()
+				if p.accept(tokenComma) {
+					p.acceptSpaces()
+					if p.accept(tokenSqClose) {
 						break
 					}
-				} else if p.acceptNosp(tokenSqClose) {
+				} else if p.accept(tokenSqClose) {
 					break
 				} else {
 					p.emitErrorf("")
@@ -1549,21 +1584,21 @@ func parseExpr9(p *parser) (expr, bool) {
 		}
 		return node, true
 
-	} else if p.acceptNosp(tokenCOpen) {
+	} else if p.accept(tokenCOpen) {
 		npos := p.token.pos
 		var m [][]expr
-		if !p.acceptNosp(tokenCClose) {
+		p.acceptSpaces()
+		if !p.accept(tokenCClose) {
 			m := make([][]expr, 0, 16)
 			for {
 				pair := []expr{nil, nil}
-				if p.acceptNosp(tokenCClose) {
-					break
-				}
-				t1 := p.nextNosp()
-				t2 := p.nextNosp()
+				p.acceptSpaces()
+				t1 := p.next()
+				p.acceptSpaces()
+				t2 := p.next()
 				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
 					pair[0] = &stringNode{p.token.pos, vainString(p.token.val)}
-					p.nextNosp()
+					p.acceptSpaces()
 					right, ok := parseExpr1(p)
 					if !ok {
 						return nil, false
@@ -1576,10 +1611,12 @@ func parseExpr9(p *parser) (expr, bool) {
 					if !ok {
 						return nil, false
 					}
-					if !p.acceptNosp(tokenColon) {
+					p.acceptSpaces()
+					if !p.accept(tokenColon) {
 						p.emitErrorf("")
 						return nil, false
 					}
+					p.acceptSpaces()
 					right, ok := parseExpr1(p)
 					if !ok {
 						return nil, false
@@ -1588,6 +1625,15 @@ func parseExpr9(p *parser) (expr, bool) {
 					pair[1] = right
 				}
 				m = append(m, pair)
+				p.acceptSpaces()
+				if p.accept(tokenComma) {
+					p.acceptSpaces()
+					if p.accept(tokenSqClose) {
+						break
+					}
+				} else if p.accept(tokenCClose) {
+					break
+				}
 			}
 		}
 		node := &dictionaryNode{}
@@ -1595,47 +1641,49 @@ func parseExpr9(p *parser) (expr, bool) {
 		node.value = m
 		return node, true
 
-	} else if p.acceptNosp(tokenPOpen) {
+	} else if p.accept(tokenPOpen) {
+		p.acceptSpaces()
 		node, ok := parseExpr1(p)
 		if !ok {
 			return nil, false
 		}
-		if !p.acceptNosp(tokenPClose) {
+		p.acceptSpaces()
+		if !p.accept(tokenPClose) {
 			p.emitErrorf("")
 			return nil, false
 		}
 		return node, true
 
-	} else if p.acceptNosp(tokenFunc) {
+	} else if p.accept(tokenFunc) {
 		p.backup(p.token)
-		return parseFunc(p)
+		return acceptFunction(p)
 
-	} else if p.acceptNosp(tokenOption) {
+	} else if p.accept(tokenOption) {
 		node := &optionNode{}
 		node.Pos = p.token.pos
 		node.value = p.token.val
 		return node, true
 
-	} else if p.acceptNosp(tokenIdentifier) {
+	} else if p.accept(tokenIdentifier) {
 		node := &identifierNode{}
 		node.Pos = p.token.pos
 		node.value = p.token.val
 		return node, true
 
-	} else if p.canBeIdentifier(p.peekNosp()) {
-		token := p.nextNosp()
+	} else if p.canBeIdentifier(p.peek()) {
+		token := p.next()
 		node := &identifierNode{}
 		node.Pos = token.pos
 		node.value = token.val
 		return node, true
 
-	} else if p.acceptNosp(tokenEnv) {
+	} else if p.accept(tokenEnv) {
 		node := &envNode{}
 		node.Pos = p.token.pos
 		node.value = p.token.val
 		return node, true
 
-	} else if p.acceptNosp(tokenReg) {
+	} else if p.accept(tokenReg) {
 		node := &regNode{}
 		node.Pos = p.token.pos
 		node.value = p.token.val
@@ -1646,6 +1694,7 @@ func parseExpr9(p *parser) (expr, bool) {
 	return nil, false
 }
 
+// identifierLike
 func (p *parser) canBeIdentifier(t *token) bool {
 	if t.typ == tokenIdentifier {
 		return true
