@@ -1452,7 +1452,6 @@ func parseExpr8(p *parser) (expr, bool) {
 					left = node
 				}
 			}
-
 		} else if p.accept(tokenPOpen) {
 			node := &callNode{}
 			node.Pos = p.token.pos
@@ -1481,7 +1480,6 @@ func parseExpr8(p *parser) (expr, bool) {
 				}
 			}
 			left = node
-
 		} else if p.accept(tokenDot) {
 			dot := p.token
 			p.acceptSpaces()
@@ -1493,7 +1491,7 @@ func parseExpr8(p *parser) (expr, bool) {
 			node.Pos = dot.pos
 			node.left = left
 			node.right = &identifierNode{p.token.pos, p.token.val}
-
+			left = node
 		} else {
 			break
 		}
