@@ -1445,7 +1445,7 @@ func parseExpr8(p *parser) (expr, bool) {
 					node.left = left
 					node.right = right
 					p.acceptSpaces()
-					if p.accept(tokenSqClose) {
+					if !p.accept(tokenSqClose) {
 						p.emitErrorf("")
 						return nil, false
 					}
