@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"runtime"
+	"runtime/debug"
 	"strings"
 )
 
@@ -69,16 +69,11 @@ func (p *parser) emitErrorf(msg string, args ...interface{}) {
 		return
 	}
 	if msg == "" {
-		_, file, line, ok := runtime.Caller(1)
-		if ok {
-			msg = fmt.Sprintf("%s: fatal: unexpected token: %+v (%s @ %d)", p.name, p.token, file, line)
-		} else {
-			msg = fmt.Sprintf("%s: fatal: unexpected token: token = %+v", p.name, p.token)
-		}
+		msg = fmt.Sprintf("%s: fatal: unexpected token: %+v\n%s",
+			p.name, p.token, string(debug.Stack()))
 	} else {
 		msg = fmt.Sprintf(msg, args...)
 	}
-	// TODO: show caller functions, and so on
 	p.nodes <- &errorNode{err: errors.New(msg), Pos: p.token.pos}
 }
 
