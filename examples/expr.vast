@@ -45,6 +45,8 @@
 (call (dot 'foo 'bar))
 (call (subscript 'foo 'bar))
 (call (subscript 'foo "bar"))
+(call (dot (dot 'foo 'bar) 'baz))
+(call (dot (dot 'foo 'bar) 'baz) 42 "hello" (list 123) (dict ('key 42)))
 (slice 'arr 0 1)
 (slice 'arr null 1)
 (slice 'arr 0 null)
