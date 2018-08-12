@@ -19,12 +19,14 @@ type lexer struct {
 	width   int        // width of last rune read from input
 	prevPos Pos        // previous position to restore
 	tokens  chan token // channel of scanned items.
+	line    int        // 1+number of newlines seen
 }
 
 type token struct {
-	typ tokenType // The type of this item.
-	pos Pos       // The starting position, in bytes, of this item in the input string.
-	val string    // The value of this item.
+	typ  tokenType // The type of this item.
+	pos  Pos       // The starting position, in bytes, of this item in the input string.
+	val  string    // The value of this item.
+	line int       // The line number of this item.
 }
 
 // Pos is offset byte position from start of the file.
@@ -107,6 +109,7 @@ func lex(name, input string) *lexer {
 		name:   name,
 		input:  input,
 		tokens: make(chan token),
+		line:   1,
 	}
 }
 
@@ -133,6 +136,9 @@ func (l *lexer) next() (r rune) {
 	r, l.width =
 		utf8.DecodeRuneInString(l.input[l.pos:])
 	l.pos = Pos(int(l.pos) + l.width)
+	if r == '\n' {
+		l.line++
+	}
 	return r
 }
 
@@ -156,6 +162,7 @@ func (l *lexer) nextRunBy(pred func(rune) bool) string {
 // ignore skips over the pending input before this point.
 func (l *lexer) ignore() {
 	l.start = l.pos
+	l.line += strings.Count(l.input[l.start:l.pos], "\n")
 }
 
 // ignoreRun skips over the pending input before this point.
@@ -180,6 +187,10 @@ func (l *lexer) ignoreSpaces() rune {
 // Can be called only once per call of next.
 func (l *lexer) backup() {
 	l.pos = Pos(int(l.pos) - l.width)
+	// Correct newline count.
+	if l.width == 1 && l.input[l.pos] == '\n' {
+		l.line--
+	}
 }
 
 // save saves current position.
@@ -265,7 +276,7 @@ func (l *lexer) acceptKeyword(kw string, boundary bool) bool {
 
 // emit passes an token back to the client.
 func (l *lexer) emit(t tokenType) {
-	tok := token{t, l.start, l.input[l.start:l.pos]}
+	tok := token{t, l.start, l.input[l.start:l.pos], l.line}
 	l.tokens <- tok
 	l.start = l.pos
 }
@@ -278,6 +289,7 @@ func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
 		tokenError,
 		l.pos,
 		fmt.Sprintf(format, args...),
+		l.line,
 	}
 	return nil
 }

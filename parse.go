@@ -69,10 +69,14 @@ func (p *parser) emitErrorf(msg string, args ...interface{}) {
 		return
 	}
 	if msg == "" {
-		msg = fmt.Sprintf("%s: fatal: unexpected token: %+v\n%s",
-			p.name, p.token, string(debug.Stack()))
+		// TODO: Don't print callstack in future.
+		msg = fmt.Sprintf("%s:%d: fatal: unexpected token: %+v\n%s",
+			p.name, p.token.line, p.token, string(debug.Stack()))
 	} else {
-		msg = fmt.Sprintf(msg, args...)
+		newargs := make([]interface{}, 0, len(args)+2)
+		newargs = append(newargs, p.name, p.token.line)
+		newargs = append(newargs, args...)
+		msg = fmt.Sprintf("%s:%d: "+msg, newargs...)
 	}
 	p.nodes <- &errorNode{err: errors.New(msg), Pos: p.token.pos}
 }
@@ -80,7 +84,7 @@ func (p *parser) emitErrorf(msg string, args ...interface{}) {
 // unexpectedEOF is called when tokenEOF was given and it's unexpected.
 func (p *parser) unexpectedEOF() {
 	p.nodes <- &errorNode{
-		err: errors.New("unexpected EOF"),
+		err: fmt.Errorf("%s:%d: unexpected EOF", p.name, p.token.line),
 		Pos: p.token.pos,
 	}
 }
@@ -88,7 +92,7 @@ func (p *parser) unexpectedEOF() {
 // tokenError is called when tokenError was given.
 func (p *parser) tokenError() {
 	p.nodes <- &errorNode{
-		err: errors.New(p.token.val),
+		err: fmt.Errorf("%s:%d: %s", p.name, p.token.line, p.token.val),
 		Pos: p.token.pos,
 	}
 }
