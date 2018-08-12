@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 )
 
 type translator interface {
@@ -163,22 +162,6 @@ func (r *errorReader) Read(p []byte) (n int, err error) {
 	return 0, r.err
 }
 
-type lazyReader struct {
-	init   func() (io.Reader, int, error)
-	reader io.Reader
-	once   sync.Once
-}
-
-func (r *lazyReader) Read(p []byte) (n int, err error) {
-	r.once.Do(func() {
-		r.reader, n, err = r.init()
-	})
-	if err != nil {
-		return n, err
-	}
-	return r.reader.Read(p)
-}
-
 func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level int) io.Reader {
 	fnlist, err := toSexp(stmt.fnlist, "[]")
 	if err != nil {
@@ -216,55 +199,48 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 }
 
 func (t *sexpTranslator) newTernaryNodeReader(node *ternaryNode, level int) io.Reader {
-	return &lazyReader{init: func() (io.Reader, int, error) {
-		var cond bytes.Buffer
-		n, err := io.Copy(&cond, t.toReader(node.cond, level))
-		if err != nil {
-			return nil, int(n), err
-		}
-		var left bytes.Buffer
-		n, err = io.Copy(&left, t.toReader(node.left, level))
-		if err != nil {
-			return nil, int(n), err
-		}
-		var right bytes.Buffer
-		n, err = io.Copy(&right, t.toReader(node.right, level))
-		if err != nil {
-			return nil, int(n), err
-		}
-		s := fmt.Sprintf("(?: %s %s %s)", cond.String(), left.String(), right.String())
-		r := strings.NewReader(s)
-		return r, 0, nil
-	}}
+	var cond bytes.Buffer
+	_, err := io.Copy(&cond, t.toReader(node.cond, level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	var left bytes.Buffer
+	_, err = io.Copy(&left, t.toReader(node.left, level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	var right bytes.Buffer
+	_, err = io.Copy(&right, t.toReader(node.right, level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	s := fmt.Sprintf("(?: %s %s %s)", cond.String(), left.String(), right.String())
+	return strings.NewReader(s)
 }
 
 func (t *sexpTranslator) newBinaryOpNodeReader(node binaryOpNode, level int, opstr string) io.Reader {
-	return &lazyReader{init: func() (io.Reader, int, error) {
-		var left bytes.Buffer
-		n, err := io.Copy(&left, t.toReader(node.Left(), level))
-		if err != nil {
-			return nil, int(n), err
-		}
-		var right bytes.Buffer
-		n, err = io.Copy(&right, t.toReader(node.Right(), level))
-		if err != nil {
-			return nil, int(n), err
-		}
-		r := strings.NewReader(fmt.Sprintf("(%s %s %s)", opstr, left.String(), right.String()))
-		return r, 0, nil
-	}}
+	var left bytes.Buffer
+	_, err := io.Copy(&left, t.toReader(node.Left(), level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	var right bytes.Buffer
+	_, err = io.Copy(&right, t.toReader(node.Right(), level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	s := fmt.Sprintf("(%s %s %s)", opstr, left.String(), right.String())
+	return strings.NewReader(s)
 }
 
 func (t *sexpTranslator) newUnaryOpNodeReader(node unaryOpNode, level int, opstr string) io.Reader {
-	return &lazyReader{init: func() (io.Reader, int, error) {
-		var value bytes.Buffer
-		n, err := io.Copy(&value, t.toReader(node.Value(), level))
-		if err != nil {
-			return nil, int(n), err
-		}
-		r := strings.NewReader(fmt.Sprintf("(%s %s)", opstr, value.String()))
-		return r, 0, nil
-	}}
+	var value bytes.Buffer
+	_, err := io.Copy(&value, t.toReader(node.Value(), level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	s := fmt.Sprintf("(%s %s)", opstr, value.String())
+	return strings.NewReader(s)
 }
 
 func (t *sexpTranslator) newIdentifierNodeReader(node *identifierNode, level int) io.Reader {
