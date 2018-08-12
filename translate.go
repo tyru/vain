@@ -64,10 +64,10 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newFuncReader(n, level)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, level)
-	// case *orNode:
-	// 	return t.newOrNodeReader(n, level)
-	// case *andNode:
-	// 	return t.newAndNodeReader(n, level)
+	case *orNode:
+		return t.newBinaryOpNodeReader(n, level, "||")
+	case *andNode:
+		return t.newBinaryOpNodeReader(n, level, "&&")
 	// case *equalNode:
 	// 	return t.newEqualNodeReader(n, level)
 	// case *equalCiNode:
@@ -233,6 +233,23 @@ func (t *sexpTranslator) newTernaryNodeReader(node *ternaryNode, level int) io.R
 		}
 		s := fmt.Sprintf("(?: %s %s %s)", cond.String(), left.String(), right.String())
 		r := strings.NewReader(s)
+		return r, 0, nil
+	}}
+}
+
+func (t *sexpTranslator) newBinaryOpNodeReader(node binaryOpNode, level int, opstr string) io.Reader {
+	return &lazyReader{init: func() (io.Reader, int, error) {
+		var left bytes.Buffer
+		n, err := io.Copy(&left, t.toReader(node.Left(), level))
+		if err != nil {
+			return nil, int(n), err
+		}
+		var right bytes.Buffer
+		n, err = io.Copy(&right, t.toReader(node.Right(), level))
+		if err != nil {
+			return nil, int(n), err
+		}
+		r := strings.NewReader(fmt.Sprintf("(%s %s %s)", opstr, left.String(), right.String()))
 		return r, 0, nil
 	}}
 }

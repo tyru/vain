@@ -466,7 +466,6 @@ type binaryOpNode interface {
 
 type orNode struct {
 	Pos
-	binaryOpNode
 	left  expr
 	right expr
 }
@@ -505,7 +504,6 @@ func parseExpr2(p *parser) (expr, bool) {
 
 type andNode struct {
 	Pos
-	binaryOpNode
 	left  expr
 	right expr
 }
