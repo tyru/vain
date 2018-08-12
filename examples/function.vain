@@ -1,3 +1,8 @@
 func foo() {}
 func <autoload> bar() {}
 func <autoload, noabort> baz() {}
+func foo() 1
+func <autoload> bar() 2
+func <autoload, noabort> baz() 3
+1 ? 2 : 3
+1 ? "42" : '3''4'

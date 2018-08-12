@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	"strings"
 )
 
 func parse(l *lexer) *parser {
@@ -181,7 +180,7 @@ type importStatement struct {
 	Pos
 	brace  bool
 	fnlist [][]string
-	pkg    string
+	pkg    vainString
 }
 
 func parseImportStatement(p *parser) (*importStatement, bool) {
@@ -204,56 +203,10 @@ func parseImportStatement(p *parser) (*importStatement, bool) {
 		p.emitErrorf("")
 		return nil, false
 	}
-	pkg, ok := evalString(p, p.token)
-	if !ok {
-		return nil, false
-	}
+	pkg := vainString(p.token.val)
 
 	stmt := &importStatement{p.start, brace, fnlist, pkg}
 	return stmt, true
-}
-
-func evalString(p *parser, t *token) (string, bool) {
-	// single quote
-	if t.val[0] == '\'' {
-		return strings.Replace(t.val[1:len(t.val)-1], "''", "'", -1), true
-	}
-	// double quote
-	s := []rune(t.val[1 : len(t.val)-1])
-	var result strings.Builder
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\\':
-			i++
-			if i >= len(s) {
-				p.emitErrorf("")
-				return "", false
-			}
-			switch s[i] {
-			case 'b':
-				result.WriteRune('\x16')
-			case 'e':
-				result.WriteRune('\x27')
-			case 'f':
-				result.WriteRune('\x0C')
-			case 'n':
-				result.WriteRune('\x15')
-			case 'r':
-				result.WriteRune('\x0D')
-			case 't':
-				result.WriteRune('\x05')
-			case 'X', 'x', 'U', 'u': // Hex, Unicode
-				// TODO
-			case '0', '1', '2', '3', '4', '5', '6', '7': // Octal
-				// TODO
-			case '<': // Special key, e.g.: "\<C-W>"
-				// TODO
-			}
-		default:
-			result.WriteRune(s[i])
-		}
-	}
-	return result.String(), true
 }
 
 // import { <import function> } from 'pkg'
@@ -1230,12 +1183,17 @@ type numberNode struct {
 
 type stringNode struct {
 	Pos
-	value string
+	value vainString
 }
 
 type listNode struct {
 	Pos
 	value []expr
+}
+
+type dictionaryNode struct {
+	Pos
+	value [][]expr
 }
 
 type optionNode struct {
@@ -1251,11 +1209,6 @@ type envNode struct {
 type regNode struct {
 	Pos
 	value string
-}
-
-type dictionaryNode struct {
-	Pos
-	value [][]expr
 }
 
 // expr9: number
@@ -1282,7 +1235,7 @@ func parseExpr9(p *parser) (expr, bool) {
 	} else if p.accept(tokenString) {
 		node := &stringNode{}
 		node.Pos = p.token.pos
-		node.value = p.token.val
+		node.value = vainString(p.token.val)
 		return node, true
 
 	} else if p.accept(tokenSqOpen) {
@@ -1323,7 +1276,7 @@ func parseExpr9(p *parser) (expr, bool) {
 				t1 := p.next()
 				t2 := p.next()
 				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
-					pair[0] = &stringNode{p.token.pos, p.token.val}
+					pair[0] = &stringNode{p.token.pos, vainString(p.token.val)}
 					p.next()
 					right, ok := parseExpr1(p)
 					if !ok {

@@ -4,3 +4,7 @@ import echo, execute as exe from '$vim/ex'
 import { echo } from '$vim/ex'
 import { echo, execute } from '$vim/ex'
 import { echo, execute as exe } from '$vim/ex'
+import echo from 'str''ing'
+import echo from "hel'lo"
+import echo from 'hel\nlo'
+import echo from "\b\e\f\n\r\t"
