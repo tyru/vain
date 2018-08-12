@@ -346,7 +346,7 @@ func parseFunc(p *parser) (*funcStmtOrExpr, bool) {
 
 	// Body
 	body = make([]node, 0, 32)
-	if p.accept(tokenCClose) {
+	if p.accept(tokenCOpen) {
 		bodyIsStmt = true
 		for {
 			if p.accept(tokenCClose) {
@@ -364,11 +364,6 @@ func parseFunc(p *parser) (*funcStmtOrExpr, bool) {
 			return nil, false
 		}
 		body = append(body, expr)
-	}
-
-	if !p.accept(tokenCClose) {
-		p.emitErrorf("")
-		return nil, false
 	}
 
 	f := &funcStmtOrExpr{p.start, mods, name, args, bodyIsStmt, body}
@@ -419,10 +414,6 @@ func parseCallSignature(p *parser) ([]argument, bool) {
 			p.emitErrorf("")
 			return nil, false
 		}
-	}
-	if !p.accept(tokenCOpen) {
-		p.emitErrorf("")
-		return nil, false
 	}
 	return args, true
 }
