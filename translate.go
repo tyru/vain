@@ -68,56 +68,56 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newBinaryOpNodeReader(n, level, "||")
 	case *andNode:
 		return t.newBinaryOpNodeReader(n, level, "&&")
-	// case *equalNode:
-	// 	return t.newEqualNodeReader(n, level)
-	// case *equalCiNode:
-	// 	return t.newEqualCiNodeReader(n, level)
-	// case *nequalNode:
-	// 	return t.newNequalNodeReader(n, level)
-	// case *nequalCiNode:
-	// 	return t.newNequalCiNodeReader(n, level)
-	// case *greaterNode:
-	// 	return t.newGreaterNodeReader(n, level)
-	// case *greaterCiNode:
-	// 	return t.newGreaterCiNodeReader(n, level)
-	// case *gequalNode:
-	// 	return t.newGequalNodeReader(n, level)
-	// case *gequalCiNode:
-	// 	return t.newGequalCiNodeReader(n, level)
-	// case *smallerNode:
-	// 	return t.newSmallerNodeReader(n, level)
-	// case *smallerCiNode:
-	// 	return t.newSmallerCiNodeReader(n, level)
-	// case *sequalNode:
-	// 	return t.newSequalNodeReader(n, level)
-	// case *sequalCiNode:
-	// 	return t.newSequalCiNodeReader(n, level)
-	// case *matchNode:
-	// 	return t.newMatchNodeReader(n, level)
-	// case *matchCiNode:
-	// 	return t.newMatchCiNodeReader(n, level)
-	// case *noMatchNode:
-	// 	return t.newNoMatchNodeReader(n, level)
-	// case *noMatchCiNode:
-	// 	return t.newNoMatchCiNodeReader(n, level)
-	// case *isNode:
-	// 	return t.newIsNodeReader(n, level)
-	// case *isCiNode:
-	// 	return t.newIsCiNodeReader(n, level)
-	// case *isNotNode:
-	// 	return t.newIsNotNodeReader(n, level)
-	// case *isNotCiNode:
-	// 	return t.newIsNotCiNodeReader(n, level)
-	// case *addNode:
-	// 	return t.newAddNodeReader(n, level)
-	// case *subtractNode:
-	// 	return t.newSubtractNodeReader(n, level)
-	// case *multiplyNode:
-	// 	return t.newMultiplyNodeReader(n, level)
-	// case *divideNode:
-	// 	return t.newDivideNodeReader(n, level)
-	// case *remainderNode:
-	// 	return t.newRemainderNodeReader(n, level)
+	case *equalNode:
+		return t.newBinaryOpNodeReader(n, level, "==")
+	case *equalCiNode:
+		return t.newBinaryOpNodeReader(n, level, "==?")
+	case *nequalNode:
+		return t.newBinaryOpNodeReader(n, level, "!=")
+	case *nequalCiNode:
+		return t.newBinaryOpNodeReader(n, level, "!=?")
+	case *greaterNode:
+		return t.newBinaryOpNodeReader(n, level, ">")
+	case *greaterCiNode:
+		return t.newBinaryOpNodeReader(n, level, ">?")
+	case *gequalNode:
+		return t.newBinaryOpNodeReader(n, level, ">=")
+	case *gequalCiNode:
+		return t.newBinaryOpNodeReader(n, level, ">=?")
+	case *smallerNode:
+		return t.newBinaryOpNodeReader(n, level, "<")
+	case *smallerCiNode:
+		return t.newBinaryOpNodeReader(n, level, "<?")
+	case *sequalNode:
+		return t.newBinaryOpNodeReader(n, level, "<=")
+	case *sequalCiNode:
+		return t.newBinaryOpNodeReader(n, level, "<=?")
+	case *matchNode:
+		return t.newBinaryOpNodeReader(n, level, "=~")
+	case *matchCiNode:
+		return t.newBinaryOpNodeReader(n, level, "=~?")
+	case *noMatchNode:
+		return t.newBinaryOpNodeReader(n, level, "!~")
+	case *noMatchCiNode:
+		return t.newBinaryOpNodeReader(n, level, "!~?")
+	case *isNode:
+		return t.newBinaryOpNodeReader(n, level, "is")
+	case *isCiNode:
+		return t.newBinaryOpNodeReader(n, level, "is?")
+	case *isNotNode:
+		return t.newBinaryOpNodeReader(n, level, "isnot")
+	case *isNotCiNode:
+		return t.newBinaryOpNodeReader(n, level, "isnot?")
+	case *addNode:
+		return t.newBinaryOpNodeReader(n, level, "+")
+	case *subtractNode:
+		return t.newBinaryOpNodeReader(n, level, "-")
+	case *multiplyNode:
+		return t.newBinaryOpNodeReader(n, level, "*")
+	case *divideNode:
+		return t.newBinaryOpNodeReader(n, level, "/")
+	case *remainderNode:
+		return t.newBinaryOpNodeReader(n, level, "%")
 	// case *notNode:
 	// 	return t.newNotNodeReader(n, level)
 	// case *minusNode:

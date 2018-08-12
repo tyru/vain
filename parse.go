@@ -546,10 +546,26 @@ type equalNode struct {
 	right expr
 }
 
+func (node *equalNode) Left() node {
+	return node.left
+}
+
+func (node *equalNode) Right() node {
+	return node.right
+}
+
 type equalCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *equalCiNode) Left() node {
+	return node.left
+}
+
+func (node *equalCiNode) Right() node {
+	return node.right
 }
 
 type nequalNode struct {
@@ -558,10 +574,26 @@ type nequalNode struct {
 	right expr
 }
 
+func (node *nequalNode) Left() node {
+	return node.left
+}
+
+func (node *nequalNode) Right() node {
+	return node.right
+}
+
 type nequalCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *nequalCiNode) Left() node {
+	return node.left
+}
+
+func (node *nequalCiNode) Right() node {
+	return node.right
 }
 
 type greaterNode struct {
@@ -570,10 +602,26 @@ type greaterNode struct {
 	right expr
 }
 
+func (node *greaterNode) Left() node {
+	return node.left
+}
+
+func (node *greaterNode) Right() node {
+	return node.right
+}
+
 type greaterCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *greaterCiNode) Left() node {
+	return node.left
+}
+
+func (node *greaterCiNode) Right() node {
+	return node.right
 }
 
 type gequalNode struct {
@@ -582,10 +630,26 @@ type gequalNode struct {
 	right expr
 }
 
+func (node *gequalNode) Left() node {
+	return node.left
+}
+
+func (node *gequalNode) Right() node {
+	return node.right
+}
+
 type gequalCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *gequalCiNode) Left() node {
+	return node.left
+}
+
+func (node *gequalCiNode) Right() node {
+	return node.right
 }
 
 type smallerNode struct {
@@ -594,10 +658,26 @@ type smallerNode struct {
 	right expr
 }
 
+func (node *smallerNode) Left() node {
+	return node.left
+}
+
+func (node *smallerNode) Right() node {
+	return node.right
+}
+
 type smallerCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *smallerCiNode) Left() node {
+	return node.left
+}
+
+func (node *smallerCiNode) Right() node {
+	return node.right
 }
 
 type sequalNode struct {
@@ -606,10 +686,26 @@ type sequalNode struct {
 	right expr
 }
 
+func (node *sequalNode) Left() node {
+	return node.left
+}
+
+func (node *sequalNode) Right() node {
+	return node.right
+}
+
 type sequalCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *sequalCiNode) Left() node {
+	return node.left
+}
+
+func (node *sequalCiNode) Right() node {
+	return node.right
 }
 
 type matchNode struct {
@@ -618,10 +714,26 @@ type matchNode struct {
 	right expr
 }
 
+func (node *matchNode) Left() node {
+	return node.left
+}
+
+func (node *matchNode) Right() node {
+	return node.right
+}
+
 type matchCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *matchCiNode) Left() node {
+	return node.left
+}
+
+func (node *matchCiNode) Right() node {
+	return node.right
 }
 
 type noMatchNode struct {
@@ -630,10 +742,26 @@ type noMatchNode struct {
 	right expr
 }
 
+func (node *noMatchNode) Left() node {
+	return node.left
+}
+
+func (node *noMatchNode) Right() node {
+	return node.right
+}
+
 type noMatchCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *noMatchCiNode) Left() node {
+	return node.left
+}
+
+func (node *noMatchCiNode) Right() node {
+	return node.right
 }
 
 type isNode struct {
@@ -642,10 +770,26 @@ type isNode struct {
 	right expr
 }
 
+func (node *isNode) Left() node {
+	return node.left
+}
+
+func (node *isNode) Right() node {
+	return node.right
+}
+
 type isCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *isCiNode) Left() node {
+	return node.left
+}
+
+func (node *isCiNode) Right() node {
+	return node.right
 }
 
 type isNotNode struct {
@@ -654,10 +798,26 @@ type isNotNode struct {
 	right expr
 }
 
+func (node *isNotNode) Left() node {
+	return node.left
+}
+
+func (node *isNotNode) Right() node {
+	return node.right
+}
+
 type isNotCiNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *isNotCiNode) Left() node {
+	return node.left
+}
+
+func (node *isNotCiNode) Right() node {
+	return node.right
 }
 
 // expr4 := expr5 "=="  expr5 /
@@ -896,10 +1056,26 @@ type addNode struct {
 	right expr
 }
 
+func (node *addNode) Left() node {
+	return node.left
+}
+
+func (node *addNode) Right() node {
+	return node.right
+}
+
 type subtractNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *subtractNode) Left() node {
+	return node.left
+}
+
+func (node *subtractNode) Right() node {
+	return node.right
 }
 
 // expr5 := expr6 1*( "+" expr6 ) /
@@ -944,16 +1120,40 @@ type multiplyNode struct {
 	right expr
 }
 
+func (node *multiplyNode) Left() node {
+	return node.left
+}
+
+func (node *multiplyNode) Right() node {
+	return node.right
+}
+
 type divideNode struct {
 	Pos
 	left  expr
 	right expr
 }
 
+func (node *divideNode) Left() node {
+	return node.left
+}
+
+func (node *divideNode) Right() node {
+	return node.right
+}
+
 type remainderNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *remainderNode) Left() node {
+	return node.left
+}
+
+func (node *remainderNode) Right() node {
+	return node.right
 }
 
 // expr6 := expr7 1*( "*" expr7 ) /
