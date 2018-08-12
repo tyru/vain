@@ -163,16 +163,27 @@ func (r *errorReader) Read(p []byte) (n int, err error) {
 }
 
 func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level int) io.Reader {
-	fnlist, err := toSexp(stmt.fnlist, "[]")
-	if err != nil {
-		return &errorReader{err}
-	}
+	args := make([]string, 0, 2)
 	pkg, err := toSexp(stmt.pkg, "")
 	if err != nil {
 		return &errorReader{err}
 	}
+	pkgPair := make([]string, 0, 2)
+	pkgPair = append(pkgPair, pkg)
+	if stmt.pkgAlias != "" {
+		pkgPair = append(pkgPair, "'"+stmt.pkgAlias)
+	}
+	args = append(args, "("+strings.Join(pkgPair, " ")+")")
 
-	s := fmt.Sprintf("%s(import %v %s %s)", t.getIndent(level), stmt.brace, fnlist, pkg)
+	if stmt.fnlist != nil {
+		fnPairList := make([]string, 0, len(stmt.fnlist))
+		for i := range stmt.fnlist {
+			fnPairList = append(fnPairList, "("+strings.Join(stmt.fnlist[i], " ")+")")
+		}
+		args = append(args, "("+strings.Join(fnPairList, " ")+")")
+	}
+
+	s := fmt.Sprintf("%s(import %s)", t.getIndent(level), strings.Join(args, " "))
 	return strings.NewReader(s)
 }
 

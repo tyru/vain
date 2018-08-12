@@ -180,9 +180,9 @@ func parseStmtOrExpr(p *parser) (node, bool) {
 	}
 
 	// Statement
-	if p.accept(tokenImport) {
+	if p.accept(tokenImport) || p.accept(tokenFrom) {
 		p.backup(p.token)
-		return parseImportStatement(p)
+		return acceptImportStatement(p)
 	}
 	if p.accept(tokenFunc) {
 		p.backup(p.token)
@@ -195,54 +195,62 @@ func parseStmtOrExpr(p *parser) (node, bool) {
 
 type importStatement struct {
 	Pos
-	brace  bool
-	fnlist [][]string
-	pkg    vainString
+	pkg      vainString
+	pkgAlias string
+	fnlist   [][]string
 }
 
-// importStatement := "import" <importFunctionList> "from" string
-func parseImportStatement(p *parser) (*importStatement, bool) {
-	if !p.accept(tokenImport) {
-		p.emitErrorf("")
-		return nil, false
+// importStatement := "import" string [ "as" *LF identifier ] |
+//                    "from" string "import" <importFunctionList>
+func acceptImportStatement(p *parser) (*importStatement, bool) {
+	if p.accept(tokenImport) {
+		if !p.accept(tokenString) {
+			p.emitErrorf("")
+			return nil, false
+		}
+		pkg := vainString(p.token.val)
+		var pkgAlias string
+		if p.accept(tokenAs) {
+			p.acceptSpaces()
+			if !p.accept(tokenIdentifier) {
+				p.emitErrorf("")
+				return nil, false
+			}
+			pkgAlias = p.token.val
+		}
+		stmt := &importStatement{p.start, pkg, pkgAlias, nil}
+		return stmt, true
+
+	} else if p.accept(tokenFrom) {
+		if !p.accept(tokenString) {
+			p.emitErrorf("")
+			return nil, false
+		}
+		pkg := vainString(p.token.val)
+		if !p.accept(tokenImport) {
+			p.emitErrorf("")
+			return nil, false
+		}
+		fnlist, ok := acceptImportFunctionList(p)
+		if !ok {
+			return nil, false
+		}
+		stmt := &importStatement{p.start, pkg, "", fnlist}
+		return stmt, true
 	}
 
-	brace, fnlist, ok := parseImportFunctionList(p)
-	if !ok {
-		return nil, false
-	}
-
-	if !p.accept(tokenFrom) {
-		p.emitErrorf("")
-		return nil, false
-	}
-
-	if !p.accept(tokenString) {
-		p.emitErrorf("")
-		return nil, false
-	}
-	pkg := vainString(p.token.val)
-
-	stmt := &importStatement{p.start, brace, fnlist, pkg}
-	return stmt, true
+	p.emitErrorf("")
+	return nil, false
 }
 
-// importFunctionList = "{" *LF importFunctionListBody *LF "}" / importFunctionListBody
-// importFunctionListBody := importFunctionListItem *( *LF "," *LF importFunctionListItem )
-// importFunctionListItem := ( identifier | "*" ) [ "as" *LF identifier ]
-func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
-	var brace bool
-	if p.accept(tokenCOpen) {
-		brace = true
-		p.acceptSpaces()
-	}
-
-	// importFunctionListBody
+// importFunctionList = importFunctionListItem *( *LF "," *LF importFunctionListItem )
+// importFunctionListItem := identifier [ "as" *LF identifier ]
+func acceptImportFunctionList(p *parser) ([][]string, bool) {
 	fnlist := make([][]string, 0, 1)
 	for {
-		if !p.accept(tokenIdentifier) && !p.accept(tokenStar) {
+		if !p.accept(tokenIdentifier) {
 			p.emitErrorf("")
-			return false, nil, false
+			return nil, false
 		}
 		orig := p.token.val
 		to := orig
@@ -251,11 +259,13 @@ func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 			p.acceptSpaces()
 			if !p.accept(tokenIdentifier) {
 				p.emitErrorf("")
-				return false, nil, false
+				return nil, false
 			}
 			to = p.token.val
+			fnlist = append(fnlist, []string{orig, to})
+		} else {
+			fnlist = append(fnlist, []string{orig})
 		}
-		fnlist = append(fnlist, []string{orig, to})
 
 		p.acceptSpaces()
 		if !p.accept(tokenComma) {
@@ -264,11 +274,7 @@ func parseImportFunctionList(p *parser) (bool, [][]string, bool) {
 		p.acceptSpaces()
 	}
 
-	if brace && !p.accept(tokenCClose) {
-		p.emitErrorf("")
-	}
-
-	return brace, fnlist, true
+	return fnlist, true
 }
 
 type funcStmtOrExpr struct {
