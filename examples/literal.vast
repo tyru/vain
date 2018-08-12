@@ -1,0 +1,6 @@
+42
+"string"
+"str'ing"
+"hel'lo"
+"hel\\nlo"
+"\u0008\u001b\u000c\n\r\t"

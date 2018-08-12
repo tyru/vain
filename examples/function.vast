@@ -1,0 +1,6 @@
+(func null "foo" null true [])
+(func ["autoload"] "bar" null true [])
+(func ["autoload","noabort"] "baz" null true [])
+(func null "foo" null false [{"Pos":84}])
+(func ["autoload"] "bar" null false [{"Pos":108}])
+(func ["autoload","noabort"] "baz" null false [{"Pos":141}])
