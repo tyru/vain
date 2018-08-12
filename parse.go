@@ -1614,7 +1614,12 @@ func parseExpr9(p *parser) (expr, bool) {
 				p.acceptSpaces()
 				t2 := p.next()
 				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
-					pair[0] = &stringNode{p.token.pos, vainString(p.token.val)}
+					vs, err := unevalString(t1.val)
+					if err != nil {
+						p.emitErrorf("cannot uneval string %s: %s", t1.val, err.Error())
+						return nil, false
+					}
+					pair[0] = &stringNode{t1.pos, *vs}
 					p.acceptSpaces()
 					right, ok := parseExpr1(p)
 					if !ok {

@@ -7,6 +7,11 @@ import (
 
 type vainString string
 
+func unevalString(s string) (*vainString, error) {
+	vs := vainString("\"" + s + "\"") // FIXME
+	return &vs, nil
+}
+
 func (vs *vainString) eval() (string, error) {
 	s := string(*vs)
 	// single quote
