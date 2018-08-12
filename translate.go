@@ -125,8 +125,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newUnaryOpNodeReader(n, level, "-")
 	case *plusNode:
 		return t.newUnaryOpNodeReader(n, level, "+")
-	// case *sliceNode:
-	// 	return t.newSliceNodeReader(n, level)
+	case *sliceNode:
+		return t.newSliceNodeReader(n, level)
 	case *callNode:
 		return t.newCallNodeReader(n, level)
 	case *subscriptNode:
@@ -267,6 +267,34 @@ func (t *sexpTranslator) newUnaryOpNodeReader(node unaryOpNode, level int, opstr
 		return &errorReader{err}
 	}
 	s := fmt.Sprintf("(%s %s)", opstr, value.String())
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newSliceNodeReader(node *sliceNode, level int) io.Reader {
+	var left bytes.Buffer
+	_, err := io.Copy(&left, t.toReader(node.left, level))
+	if err != nil {
+		return &errorReader{err}
+	}
+	from := "null"
+	if node.rlist[0] != nil {
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, t.toReader(node.rlist[0], level))
+		if err != nil {
+			return &errorReader{err}
+		}
+		from = buf.String()
+	}
+	to := "null"
+	if node.rlist[1] != nil {
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, t.toReader(node.rlist[1], level))
+		if err != nil {
+			return &errorReader{err}
+		}
+		to = buf.String()
+	}
+	s := fmt.Sprintf("(slice %s %s %s)", left.String(), from, to)
 	return strings.NewReader(s)
 }
 

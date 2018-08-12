@@ -45,3 +45,9 @@ foo()
 foo.bar()
 foo[bar]()
 foo["bar"]()
+arr[0:1]
+arr[:1]
+arr[0:]
+arr[from:to]
+arr[:to]
+arr[from:]
