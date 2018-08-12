@@ -36,7 +36,7 @@
 (list 1 2)
 (list 1 (list 2 (list 3)))
 (dict)
-(dict ("key" "value"))
+(dict (key "value"))
 (dict ("key" "value"))
 (dot foo bar)
 (subscript foo bar)
