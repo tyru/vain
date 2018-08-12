@@ -45,6 +45,7 @@ type errorNode struct {
 
 func (p *parser) Run() {
 	if toplevel, ok := parseTopLevel(p); ok {
+		toplevel.Pos = 0 // first read node's position is -1. adjust it
 		p.emit(toplevel)
 	}
 	close(p.nodes) // No more nodes will be delivered.
