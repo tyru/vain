@@ -4,3 +4,18 @@ func <autoload, noabort> baz() {}
 func foo() 1
 func <autoload> bar() 2
 func <autoload, noabort> baz() 3
+func foo(a: Int) 42
+func foo(a: Int, b:Int) 42
+func foo(a: Int, b:Int,) 42
+func foo(
+  a: Int
+) 42
+func foo(
+  a: Int,
+) 42
+func foo(
+  a: Int, b:Int
+) 42
+func foo(
+  a: Int, b:Int,
+) 42

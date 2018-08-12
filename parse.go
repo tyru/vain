@@ -381,22 +381,26 @@ func acceptFunctionCallSignature(p *parser) ([]argument, bool) {
 	}
 	p.acceptSpaces()
 
-	args := make([]argument, 0, 8)
-	for {
-		if p.accept(tokenPClose) {
-			break
+	var args []argument
+	if !p.accept(tokenPClose) {
+		args := make([]argument, 0, 8)
+		for {
+			arg, ok := acceptFunctionArgument(p)
+			if !ok {
+				return nil, false
+			}
+			args = append(args, *arg)
+			p.acceptSpaces()
+			if p.accept(tokenComma) {
+				p.acceptSpaces()
+				if p.accept(tokenPClose) {
+					break
+				}
+			} else if p.accept(tokenPClose) {
+				break
+			}
+			p.acceptSpaces()
 		}
-		arg, ok := acceptFunctionArgument(p)
-		if !ok {
-			return nil, false
-		}
-		args = append(args, *arg)
-		p.acceptSpaces()
-		if !p.accept(tokenComma) {
-			p.emitErrorf("")
-			return nil, false
-		}
-		p.acceptSpaces()
 	}
 	return args, true
 }
