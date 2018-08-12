@@ -49,8 +49,8 @@ func build(args []string) error {
 	transpileErrs := make([]error, 16)
 	go func() {
 		for src := range files {
-			// file.vain -> file.vim
-			dst := src[:len(src)-len(".vain")] + ".vim"
+			// file.vain -> file.vast
+			dst := src[:len(src)-len(".vain")] + ".vast"
 			err := transpileFile(dst, src)
 			if err != nil {
 				transpileErrs = append(transpileErrs, err)
