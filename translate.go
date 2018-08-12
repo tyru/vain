@@ -164,7 +164,7 @@ func (r *errorReader) Read(p []byte) (n int, err error) {
 
 func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level int) io.Reader {
 	args := make([]string, 0, 2)
-	pkg, err := toSexp(stmt.pkg, "")
+	pkg, err := t.toJSONString(&stmt.pkg)
 	if err != nil {
 		return &errorReader{err}
 	}
@@ -188,10 +188,6 @@ func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level i
 }
 
 func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
-	name, err := toSexp(f.name, "")
-	if err != nil {
-		return &errorReader{err}
-	}
 	args := make([]string, 0, len(f.args))
 	for i := range f.args {
 		arg := f.args[i]
@@ -199,7 +195,7 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 			args = append(args, fmt.Sprintf("(%s : %s)", arg.name, arg.typ))
 		} else {
 			var buf bytes.Buffer
-			_, err = io.Copy(&buf, t.toReader(arg.defaultVal, level+1))
+			_, err := io.Copy(&buf, t.toReader(arg.defaultVal, level+1))
 			if err != nil {
 				return &errorReader{err}
 			}
@@ -209,7 +205,7 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 	bodyList := make([]string, 0, len(f.body))
 	for i := range f.body {
 		var buf bytes.Buffer
-		_, err = io.Copy(&buf, t.toReader(f.body[i], level+1))
+		_, err := io.Copy(&buf, t.toReader(f.body[i], level+1))
 		if err != nil {
 			return &errorReader{err}
 		}
@@ -221,14 +217,14 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		s = fmt.Sprintf("%s(func (%s) %s (%s) (%s))",
 			t.getIndent(level),
 			strings.Join(f.mods, " "),
-			name,
+			f.name,
 			strings.Join(args, " "),
 			strings.Join(bodyList, " "))
 	} else {
 		s = fmt.Sprintf("%s(func (%s) %s (%s) %s)",
 			t.getIndent(level),
 			strings.Join(f.mods, " "),
-			name,
+			f.name,
 			strings.Join(args, " "),
 			bodyList[0])
 	}
@@ -341,7 +337,7 @@ func (t *sexpTranslator) newNumberNodeReader(node *numberNode, level int) io.Rea
 }
 
 func (t *sexpTranslator) newStringNodeReader(node *stringNode, level int) io.Reader {
-	value, err := toSexp(node.value, "")
+	value, err := t.toJSONString(&node.value)
 	if err != nil {
 		return &errorReader{err}
 	}
@@ -349,7 +345,7 @@ func (t *sexpTranslator) newStringNodeReader(node *stringNode, level int) io.Rea
 }
 
 func (t *sexpTranslator) newLiteralNodeReader(node literalNode, level int, opstr string) io.Reader {
-	value, err := toSexp(node.Value(), "")
+	value, err := json.Marshal(node.Value())
 	if err != nil {
 		return &errorReader{err}
 	}
@@ -394,41 +390,14 @@ func (t *sexpTranslator) newDictionaryNodeReader(node *dictionaryNode, level int
 	return strings.NewReader(s)
 }
 
-func toSexp(v interface{}, defVal string) (string, error) {
-	switch vv := v.(type) {
-	case vainString:
-		// Convert to JSON string.
-		s, err := vv.eval()
-		if err != nil {
-			return "", err
-		}
-		return toSexp(s, defVal)
-	case map[string]interface{}:
-		elems := make([]string, 0, len(vv)+1)
-		elems = append(elems, "dict")
-		for k := range vv {
-			s, err := toSexp(vv[k], "")
-			if err != nil {
-				return "", err
-			}
-			elems = append(elems, fmt.Sprintf("(%v %v)", k, s))
-		}
-		s := "(" + strings.Join(elems, " ") + ")"
-		return s, nil
-	case []interface{}:
-		elems := make([]string, 0, len(vv)+1)
-		elems = append(elems, "list")
-		for i := range vv {
-			s, err := toSexp(vv[i], "")
-			if err != nil {
-				return "", err
-			}
-			elems = append(elems, s)
-		}
-		s := "(" + strings.Join(elems, " ") + ")"
-		return s, nil
-	default:
-		b, err := json.Marshal(vv)
-		return string(b), err
+func (t *sexpTranslator) toJSONString(vs *vainString) (string, error) {
+	s, err := vs.eval()
+	if err != nil {
+		return "", err
 	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
