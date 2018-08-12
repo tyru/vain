@@ -116,7 +116,7 @@ func transpile(dst io.Writer, src io.Reader, srcpath string) error {
 	done := make(chan bool, 1)
 	lexer := lex(srcpath, content.String())
 	parser := parse(lexer)
-	translator := translateAST(parser)
+	translator := translateSexp(parser)
 	errs := make([]error, 0, 32)
 
 	// 4. Output

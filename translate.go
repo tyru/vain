@@ -12,38 +12,59 @@ type translator interface {
 	Readers() <-chan io.Reader
 }
 
-func translateAST(p *parser) translator {
-	return &astTranslator{p, make(chan io.Reader)}
+func translateSexp(p *parser) translator {
+	return &sexpTranslator{p, make(chan io.Reader)}
 }
 
-type astTranslator struct {
+type sexpTranslator struct {
 	parser  *parser
 	readers chan io.Reader
 }
 
-func (t *astTranslator) Run() {
+func (t *sexpTranslator) Run() {
 	for node := range t.parser.nodes {
-		switch n := node.(type) {
-		case *errorNode:
-			t.emit(&errorReader{n.err})
-		case *importStatement:
-			t.emit(newImportStatementReader(n))
-		case *funcStatement:
-			t.emit(newFuncStatementReader(n))
-		}
+		t.emit(toReader(node))
 	}
 	close(t.readers)
 }
 
-func (t *astTranslator) Readers() <-chan io.Reader {
+func toReader(node node) io.Reader {
+	switch n := node.(type) {
+	case *errorNode:
+		return &errorReader{n.err}
+	case *topLevelNode:
+		rs := make([]io.Reader, 0, len(n.body))
+		for i := range n.body {
+			if i > 0 {
+				rs = append(rs, strings.NewReader("\n"), toReader(n.body[i]))
+			} else {
+				rs = append(rs, toReader(n.body[i]))
+			}
+		}
+		return io.MultiReader(rs...)
+	case *importStatement:
+		return newImportStatementReader(n)
+	case *funcStmtOrExpr:
+		return newFuncReader(n)
+	}
+	return nopReader
+}
+
+var nopReader = &nopReaderT{}
+
+type nopReaderT struct{}
+
+func (nopReaderT) Read(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (t *sexpTranslator) Readers() <-chan io.Reader {
 	return t.readers
 }
 
-func (t *astTranslator) emit(r reader) {
+func (t *sexpTranslator) emit(r io.Reader) {
 	t.readers <- r
 }
-
-type reader io.Reader
 
 type errorReader struct {
 	err error
@@ -57,53 +78,76 @@ type importStatementReader struct {
 	io.Reader
 }
 
-func newImportStatementReader(stmt *importStatement) reader {
-	fnlist, err := marshalDefault(stmt.fnlist, "[]")
+func newImportStatementReader(stmt *importStatement) io.Reader {
+	fnlist, err := toSexp(stmt.fnlist, "[]")
 	if err != nil {
 		return &errorReader{err}
 	}
-	pkg, err := json.Marshal(stmt.pkg)
+	pkg, err := toSexp(stmt.pkg, "")
 	if err != nil {
 		return &errorReader{err}
 	}
 
-	s := fmt.Sprintf("importStatement(%v,%v,%v)\n", stmt.brace, string(fnlist), string(pkg))
+	s := fmt.Sprintf("(import %v %v %v)", stmt.brace, fnlist, pkg)
 	r := strings.NewReader(s)
 	return &importStatementReader{r}
 }
 
-type funcStatementReader struct {
+type funcReader struct {
 	io.Reader
 }
 
-func newFuncStatementReader(stmt *funcStatement) reader {
-	mods, err := marshalDefault(stmt.mods, "[]")
+func newFuncReader(f *funcStmtOrExpr) io.Reader {
+	mods, err := toSexp(f.mods, "[]")
 	if err != nil {
 		return &errorReader{err}
 	}
-	name, err := json.Marshal(stmt.name)
+	name, err := toSexp(f.name, "")
 	if err != nil {
 		return &errorReader{err}
 	}
-	args, err := marshalDefault(stmt.args, "[]")
+	args, err := toSexp(f.args, "[]")
 	if err != nil {
 		return &errorReader{err}
 	}
-	body, err := marshalDefault(stmt.body, "[]")
+	body, err := toSexp(f.body, "[]")
 	if err != nil {
 		return &errorReader{err}
 	}
 
-	s := fmt.Sprintf("funcStatement(%v,%v,%v,%v)\n",
-		string(mods), string(name), string(args), string(body))
+	s := fmt.Sprintf("(func %v %v %v %v %v)", mods, name, args, f.bodyIsStmt, body)
 	r := strings.NewReader(s)
-	return &funcStatementReader{r}
+	return &funcReader{r}
 }
 
-func marshalDefault(v interface{}, defVal string) ([]byte, error) {
-	b, err := json.Marshal(v)
-	if string(b) == "null" {
-		b = []byte(defVal)
+func toSexp(v interface{}, defVal string) (string, error) {
+	switch vv := v.(type) {
+	case map[string]interface{}:
+		elems := make([]string, 0, len(vv)+1)
+		elems = append(elems, "dict")
+		for k := range vv {
+			s, err := toSexp(vv[k], "")
+			if err != nil {
+				return "", err
+			}
+			elems = append(elems, fmt.Sprintf("(%v %v)", k, s))
+		}
+		s := "(" + strings.Join(elems, " ") + ")"
+		return s, nil
+	case []interface{}:
+		elems := make([]string, 0, len(vv)+1)
+		elems = append(elems, "list")
+		for i := range vv {
+			s, err := toSexp(vv[i], "")
+			if err != nil {
+				return "", err
+			}
+			elems = append(elems, s)
+		}
+		s := "(" + strings.Join(elems, " ") + ")"
+		return s, nil
+	default:
+		b, err := json.Marshal(vv)
+		return string(b), err
 	}
-	return b, err
 }

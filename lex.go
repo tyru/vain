@@ -14,17 +14,25 @@ import (
 type lexer struct {
 	name    string     // used only for error reports.
 	input   string     // the string being scanned.
-	start   int        // start position of this item.
-	pos     int        // current position in the input.
+	start   Pos        // start position of this item.
+	pos     Pos        // current position in the input.
 	width   int        // width of last rune read from input
-	prevPos int        // previous position to restore
+	prevPos Pos        // previous position to restore
 	tokens  chan token // channel of scanned items.
 }
 
 type token struct {
 	typ tokenType // The type of this item.
-	pos int       // The starting position, in bytes, of this item in the input string.
+	pos Pos       // The starting position, in bytes, of this item in the input string.
 	val string    // The value of this item.
+}
+
+// Pos is offset byte position from start of the file.
+type Pos int
+
+// Position returns pos itself
+func (p Pos) Position() Pos {
+	return p
 }
 
 type tokenType int
@@ -35,27 +43,56 @@ const (
 	tokenIdentifier
 	tokenComma
 	tokenEqual
+	tokenEqEq
+	tokenEqEqCi
 	tokenColon
 	tokenQuestion
-	tokenAsterisk
-	tokenLeftBracket
-	tokenRightBracket
-	tokenLeftAngleBracket
-	tokenRightAngleBracket
-	tokenLeftBrace
-	tokenRightBrace
-	tokenLeftParen
-	tokenRightParen
+	tokenStar
+	tokenSlash
+	tokenPercent
+	tokenSqOpen
+	tokenSqClose
+	tokenCOpen
+	tokenCClose
+	tokenPOpen
+	tokenPClose
 	tokenNumber
 	tokenString
+	tokenOption
+	tokenEnv
+	tokenReg
 	tokenBoolean
 	tokenNone
+	tokenNot
+	tokenNeq
+	tokenNeqCi
+	tokenLt
+	tokenLtCi
 	tokenLtEq
 	tokenLtEqCi
+	tokenGt
+	tokenGtCi
 	tokenGtEq
 	tokenGtEqCi
+	tokenMatch
+	tokenMatchCi
+	tokenNoMatch
+	tokenNoMatchCi
+	tokenIs
+	tokenIsCi
+	tokenIsNot
+	tokenIsNotCi
+	tokenOr
+	tokenOrOr
+	tokenAnd
+	tokenAndAnd
+	tokenPlus
+	tokenMinus
+	tokenArrow
+	tokenDot
+	tokenDotDotDot
 	tokenConst
-	tokenVar
+	tokenLet
 	tokenFunc
 	tokenReturn
 	tokenImport
@@ -85,7 +122,7 @@ func (l *lexer) Run() {
 const eof = -1
 
 func (l *lexer) eof() bool {
-	return l.pos >= len(l.input)
+	return int(l.pos) >= len(l.input)
 }
 
 // next returns the next rune in the input.
@@ -95,7 +132,7 @@ func (l *lexer) next() (r rune) {
 	}
 	r, l.width =
 		utf8.DecodeRuneInString(l.input[l.pos:])
-	l.pos += l.width
+	l.pos = Pos(int(l.pos) + l.width)
 	return r
 }
 
@@ -142,7 +179,7 @@ func (l *lexer) ignoreSpaces() rune {
 // backup steps back one rune.
 // Can be called only once per call of next.
 func (l *lexer) backup() {
-	l.pos -= l.width
+	l.pos = Pos(int(l.pos) - l.width)
 }
 
 // save saves current position.
@@ -228,7 +265,8 @@ func (l *lexer) acceptKeyword(kw string, boundary bool) bool {
 
 // emit passes an token back to the client.
 func (l *lexer) emit(t tokenType) {
-	l.tokens <- token{t, l.start, l.input[l.start:l.pos]}
+	tok := token{t, l.start, l.input[l.start:l.pos]}
+	l.tokens <- tok
 	l.start = l.pos
 }
 
@@ -242,6 +280,14 @@ func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
 		fmt.Sprintf(format, args...),
 	}
 	return nil
+}
+
+func isWordHead(r rune) bool {
+	return r == '_' || unicode.IsLetter(r)
+}
+
+func isAlpha(r rune) bool {
+	return unicode.IsLetter(r)
 }
 
 func isNumeric(r rune) bool {
@@ -258,62 +304,149 @@ func lexTop(l *lexer) lexStateFn {
 		return nil
 	}
 
+	if l.acceptBy(isNumeric) {
+		l.backup()
+		return lexNumber
+	}
+
 	r := l.next()
 	switch r {
 	case '\'', '"':
 		l.backup()
 		return lexString
 	case '[':
-		l.emit(tokenLeftBracket)
+		l.emit(tokenSqOpen)
 		return lexTop
 	case ']':
-		l.emit(tokenRightBracket)
+		l.emit(tokenSqClose)
 		return lexTop
 	case '<':
 		if l.acceptKeyword("=?", false) {
 			l.emit(tokenLtEqCi)
 			return lexTop
 		}
-		if l.acceptKeyword("=", false) {
+		if l.accept("=") {
 			l.emit(tokenLtEq)
 			return lexTop
 		}
-		l.emit(tokenLeftAngleBracket)
+		if l.accept("?") {
+			l.emit(tokenLtCi)
+			return lexTop
+		}
+		l.emit(tokenLt)
 		return lexTop
 	case '>':
 		if l.acceptKeyword("=?", false) {
 			l.emit(tokenGtEqCi)
 			return lexTop
 		}
-		if l.acceptKeyword("=", false) {
+		if l.accept("=") {
 			l.emit(tokenGtEq)
 			return lexTop
 		}
-		l.emit(tokenRightAngleBracket)
+		if l.accept("?") {
+			l.emit(tokenGtCi)
+			return lexTop
+		}
+		l.emit(tokenGt)
 		return lexTop
+	case '|':
+		if l.accept("|") {
+			l.emit(tokenOrOr)
+			return lexTop
+		}
+		l.emit(tokenOr)
+		return lexTop
+	case '&':
+		l.backup()
+		return lexOption
+	case '$':
+		l.backup()
+		return lexEnv
+	case '@':
+		l.backup()
+		return lexReg
 	case '{':
-		l.emit(tokenLeftBrace)
+		l.emit(tokenCOpen)
 		return lexTop
 	case '}':
-		l.emit(tokenRightBrace)
+		l.emit(tokenCClose)
 		return lexTop
 	case '(':
-		l.emit(tokenLeftParen)
+		l.emit(tokenPOpen)
 		return lexTop
 	case ')':
-		l.emit(tokenRightParen)
+		l.emit(tokenPClose)
+		return lexTop
+	case '!':
+		if l.acceptKeyword("~?", false) {
+			l.emit(tokenNoMatchCi)
+			return lexTop
+		}
+		if l.accept("~") {
+			l.emit(tokenNoMatch)
+			return lexTop
+		}
+		if l.acceptKeyword("=?", false) {
+			l.emit(tokenNeqCi)
+			return lexTop
+		}
+		if l.accept("=") {
+			l.emit(tokenNeq)
+			return lexTop
+		}
+		l.emit(tokenNot)
 		return lexTop
 	case '?':
 		l.emit(tokenQuestion)
 		return lexTop
 	case '*':
-		l.emit(tokenAsterisk)
+		l.emit(tokenStar)
+		return lexTop
+	case '/':
+		l.emit(tokenSlash)
+		return lexTop
+	case '%':
+		l.emit(tokenPercent)
 		return lexTop
 	case ',':
 		l.emit(tokenComma)
 		return lexTop
 	case '=':
+		if l.acceptKeyword("~?", false) {
+			l.emit(tokenMatchCi)
+			return lexTop
+		}
+		if l.accept("~") {
+			l.emit(tokenMatch)
+			return lexTop
+		}
+		if l.acceptKeyword("=?", false) {
+			l.emit(tokenEqEqCi)
+			return lexTop
+		}
+		if l.accept("=") {
+			l.emit(tokenEqEq)
+			return lexTop
+		}
 		l.emit(tokenEqual)
+		return lexTop
+	case '+':
+		l.emit(tokenPlus)
+		return lexTop
+	case '-':
+		if l.accept(">") {
+			l.emit(tokenArrow)
+			return lexTop
+		}
+		l.emit(tokenMinus)
+		return lexTop
+	case '.':
+		if l.acceptKeyword("..", false) {
+			l.emit(tokenDotDotDot)
+			return lexTop
+		}
+		l.emit(tokenDot)
 		return lexTop
 	case ':':
 		l.emit(tokenColon)
@@ -322,19 +455,28 @@ func lexTop(l *lexer) lexStateFn {
 		l.backup()
 	}
 
-	if l.acceptBy(isNumeric) {
-		l.backup()
-		return lexNumber
-	}
-
 	// Reserved words
 	w := l.nextRunBy(isAlphaNumeric)
 	switch w {
+	case "is":
+		if l.accept("?") {
+			l.emit(tokenIsCi)
+			return lexTop
+		}
+		l.emit(tokenIs)
+		return lexTop
+	case "isnot":
+		if l.accept("?") {
+			l.emit(tokenIsNotCi)
+			return lexTop
+		}
+		l.emit(tokenIsNot)
+		return lexTop
 	case "const":
 		l.emit(tokenConst)
 		return lexTop
-	case "var":
-		l.emit(tokenVar)
+	case "let":
+		l.emit(tokenLet)
 		return lexTop
 	case "func":
 		l.emit(tokenFunc)
@@ -377,8 +519,6 @@ func lexNumber(l *lexer) lexStateFn {
 
 // TODO Should we split Int/Float tokens?
 func acceptNumber(l *lexer) bool {
-	// Optional leading sign.
-	l.accept("+-")
 	// Is it hex?
 	digits := "0123456789"
 	if l.accept("0") && l.accept("xX") {
@@ -458,4 +598,77 @@ func acceptString(l *lexer) error {
 		}
 	}
 	// never reach here
+}
+
+func lexOption(l *lexer) lexStateFn {
+	l.accept("&")
+	if l.accept("&") {
+		l.emit(tokenAndAnd)
+		return lexTop
+	}
+
+	if l.acceptBy(isWordHead) {
+		l.backup()
+		err := acceptOption(l)
+		if err != nil {
+			return l.errorf(err.Error())
+		}
+		l.emit(tokenOption)
+		return lexTop
+	}
+
+	l.emit(tokenAnd)
+	return lexTop
+}
+
+func acceptOption(l *lexer) error {
+	l.save()
+	if l.acceptKeyword("g:", false) || l.acceptKeyword("l:", false) {
+		if l.nextRunBy(isAlphaNumeric) == "" {
+			l.restore()
+			return errors.New("option name was missing")
+		}
+		return nil
+	}
+	if l.nextRunBy(isAlphaNumeric) == "" {
+		l.restore()
+		return errors.New("option name was missing")
+	}
+	return nil
+}
+
+func lexEnv(l *lexer) lexStateFn {
+	l.save()
+	l.accept("$")
+	w := l.nextRunBy(isAlphaNumeric)
+	if w == "" {
+		l.restore()
+		return l.errorf("environment variable name was missing")
+	}
+	l.emit(tokenEnv)
+	return lexTop
+}
+
+func lexReg(l *lexer) lexStateFn {
+	// @ is same as @"
+	l.accept("@")
+	l.acceptBy(func(r rune) bool {
+		// :h registers
+		return r == '"' ||
+			isNumeric(r) ||
+			r == '-' ||
+			isAlpha(r) ||
+			r == ':' ||
+			r == '.' ||
+			r == '%' ||
+			r == '#' ||
+			r == '=' ||
+			r == '*' ||
+			r == '+' ||
+			r == '~' ||
+			r == '_' ||
+			r == '/'
+	})
+	l.emit(tokenReg)
+	return lexTop
 }
