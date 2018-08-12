@@ -129,10 +129,10 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	// 	return t.newSliceNodeReader(n, level)
 	// case *callNode:
 	// 	return t.newCallNodeReader(n, level)
-	// case *subscriptNode:
-	// 	return t.newSubscriptNodeReader(n, level)
-	// case *dotNode:
-	// 	return t.newDotNodeReader(n, level)
+	case *subscriptNode:
+		return t.newBinaryOpNodeReader(n, level, "subscript")
+	case *dotNode:
+		return t.newBinaryOpNodeReader(n, level, "dot")
 	case *identifierNode:
 		return t.newIdentifierNodeReader(n, level)
 	case *numberNode:

@@ -30,3 +30,6 @@
 (! 1)
 (- 1)
 (+ 1)
+(dot foo bar)
+(subscript foo bar)
+(subscript foo "bar")
