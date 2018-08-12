@@ -8,19 +8,19 @@ import (
 	"strings"
 )
 
-func translateSexp(p *parser) translator {
-	return &sexpTranslator{p.name, p, make(chan io.Reader), "  "}
+func translateSexp(a *analyzer) translator {
+	return &sexpTranslator{a.name, a.nodes, make(chan io.Reader), "  "}
 }
 
 type sexpTranslator struct {
 	name    string
-	parser  *parser
+	nodes   <-chan node
 	readers chan io.Reader
 	indent  string
 }
 
 func (t *sexpTranslator) Run() {
-	for node := range t.parser.nodes {
+	for node := range t.nodes {
 		t.emit(t.toReader(node, 0))
 	}
 	close(t.readers)

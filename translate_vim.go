@@ -8,20 +8,20 @@ import (
 	"strings"
 )
 
-func translateVim(p *parser) translator {
-	return &vimTranslator{p.name, p, make(chan io.Reader), "  ", make([]io.Reader, 0, 16)}
+func translateVim(a *analyzer) translator {
+	return &vimTranslator{a.name, a.nodes, make(chan io.Reader), "  ", make([]io.Reader, 0, 16)}
 }
 
 type vimTranslator struct {
 	name           string
-	parser         *parser
+	nodes          <-chan node
 	readers        chan io.Reader
 	indent         string
 	namedExprFuncs []io.Reader
 }
 
 func (t *vimTranslator) Run() {
-	for node := range t.parser.nodes {
+	for node := range t.nodes {
 		toplevel := t.toReader(node, node, 0)
 		if len(t.namedExprFuncs) > 0 {
 			t.emit(strings.NewReader("\" vain: begin named expression functions\n"))

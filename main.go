@@ -101,7 +101,7 @@ func build(args []string) error {
 	return e.ErrorOrNil()
 }
 
-func transpileFile(dstpath, srcpath string, translate func(*parser) translator) error {
+func transpileFile(dstpath, srcpath string, translate func(*analyzer) translator) error {
 	src, err := os.Open(srcpath)
 	if err != nil {
 		return err
@@ -123,7 +123,7 @@ func transpileFile(dstpath, srcpath string, translate func(*parser) translator) 
 	return os.Rename(tmpfile.Name(), dstpath)
 }
 
-func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*parser) translator) error {
+func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*analyzer) translator) error {
 	var content strings.Builder
 	_, err := io.Copy(&content, src)
 	if err != nil {
@@ -134,10 +134,11 @@ func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*par
 	done := make(chan bool, 1)
 	lexer := lex(srcpath, content.String())
 	parser := parse(lexer)
-	translator := translate(parser)
+	analyzer := analyze(parser)
+	translator := translate(analyzer)
 	errs := make([]error, 0, 32)
 
-	// 4. Output
+	// 5. Output
 	go func() {
 		for r := range translator.Readers() {
 			_, err := io.Copy(dstbuf, r)
@@ -148,8 +149,11 @@ func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*par
 		done <- true
 	}()
 
-	// 3. Translate
+	// 4. Translate
 	go translator.Run()
+
+	// 3. Analyze
+	go analyzer.Run()
 
 	// 2. Parse
 	go parser.Run()
