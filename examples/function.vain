@@ -19,3 +19,11 @@ func foo(
 func foo(
   a: Int, b:Int,
 ) 42
+func () {}
+func () 1
+func <autoload> () 2
+func <autoload> () {}
+func (a: Int) 42
+func (a: Int) {}
+func <autoload> (a: Int) 42
+func <autoload> (a: Int) {}

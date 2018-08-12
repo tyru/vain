@@ -178,24 +178,50 @@ func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level i
 }
 
 func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
-	mods, err := toSexp(f.mods, "[]")
-	if err != nil {
-		return &errorReader{err}
-	}
 	name, err := toSexp(f.name, "")
 	if err != nil {
 		return &errorReader{err}
 	}
-	args, err := toSexp(f.args, "[]")
-	if err != nil {
-		return &errorReader{err}
+	args := make([]string, 0, len(f.args))
+	for i := range f.args {
+		arg := f.args[i]
+		if arg.typ != "" {
+			args = append(args, fmt.Sprintf("(%s : %s)", arg.name, arg.typ))
+		} else {
+			var buf bytes.Buffer
+			_, err = io.Copy(&buf, t.toReader(arg.defaultVal, level+1))
+			if err != nil {
+				return &errorReader{err}
+			}
+			args = append(args, fmt.Sprintf("(%s = %s)", arg.name, buf.String()))
+		}
 	}
-	body, err := toSexp(f.body, "[]")
-	if err != nil {
-		return &errorReader{err}
+	bodyList := make([]string, 0, len(f.body))
+	for i := range f.body {
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, t.toReader(f.body[i], level+1))
+		if err != nil {
+			return &errorReader{err}
+		}
+		bodyList = append(bodyList, buf.String())
 	}
 
-	s := fmt.Sprintf("%s(func %s %s %s %v %s)", t.getIndent(level), mods, name, args, f.bodyIsStmt, body)
+	var s string
+	if f.bodyIsStmt {
+		s = fmt.Sprintf("%s(func (%s) %s (%s) (%s))",
+			t.getIndent(level),
+			strings.Join(f.mods, " "),
+			name,
+			strings.Join(args, " "),
+			strings.Join(bodyList, " "))
+	} else {
+		s = fmt.Sprintf("%s(func (%s) %s (%s) %s)",
+			t.getIndent(level),
+			strings.Join(f.mods, " "),
+			name,
+			strings.Join(args, " "),
+			bodyList[0])
+	}
 	return strings.NewReader(s)
 }
 
