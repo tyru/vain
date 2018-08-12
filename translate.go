@@ -15,10 +15,11 @@ type translator interface {
 }
 
 func translateSexp(p *parser) translator {
-	return &sexpTranslator{p, make(chan io.Reader), "  "}
+	return &sexpTranslator{p.name, p, make(chan io.Reader), "  "}
 }
 
 type sexpTranslator struct {
+	name    string
 	parser  *parser
 	readers chan io.Reader
 	indent  string
@@ -118,12 +119,12 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newBinaryOpNodeReader(n, level, "/")
 	case *remainderNode:
 		return t.newBinaryOpNodeReader(n, level, "%")
-	// case *notNode:
-	// 	return t.newNotNodeReader(n, level)
-	// case *minusNode:
-	// 	return t.newMinusNodeReader(n, level)
-	// case *plusNode:
-	// 	return t.newPlusNodeReader(n, level)
+	case *notNode:
+		return t.newUnaryOpNodeReader(n, level, "!")
+	case *minusNode:
+		return t.newUnaryOpNodeReader(n, level, "-")
+	case *plusNode:
+		return t.newUnaryOpNodeReader(n, level, "+")
 	// case *sliceNode:
 	// 	return t.newSliceNodeReader(n, level)
 	// case *callNode:
@@ -250,6 +251,18 @@ func (t *sexpTranslator) newBinaryOpNodeReader(node binaryOpNode, level int, ops
 			return nil, int(n), err
 		}
 		r := strings.NewReader(fmt.Sprintf("(%s %s %s)", opstr, left.String(), right.String()))
+		return r, 0, nil
+	}}
+}
+
+func (t *sexpTranslator) newUnaryOpNodeReader(node unaryOpNode, level int, opstr string) io.Reader {
+	return &lazyReader{init: func() (io.Reader, int, error) {
+		var value bytes.Buffer
+		n, err := io.Copy(&value, t.toReader(node.Value(), level))
+		if err != nil {
+			return nil, int(n), err
+		}
+		r := strings.NewReader(fmt.Sprintf("(%s %s)", opstr, value.String()))
 		return r, 0, nil
 	}}
 }

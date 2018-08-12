@@ -1236,9 +1236,17 @@ func parseExpr6(p *parser) (expr, bool) {
 	return left, true
 }
 
+type unaryOpNode interface {
+	Value() node
+}
+
 type notNode struct {
 	Pos
 	left expr
+}
+
+func (node *notNode) Value() node {
+	return node.left
 }
 
 type minusNode struct {
@@ -1246,9 +1254,17 @@ type minusNode struct {
 	left expr
 }
 
+func (node *minusNode) Value() node {
+	return node.left
+}
+
 type plusNode struct {
 	Pos
 	left expr
+}
+
+func (node *plusNode) Value() node {
+	return node.left
 }
 
 // expr7 := "!" expr7 /
@@ -1310,10 +1326,26 @@ type subscriptNode struct {
 	right expr
 }
 
+func (node *subscriptNode) Left() node {
+	return node.left
+}
+
+func (node *subscriptNode) Right() node {
+	return node.right
+}
+
 type dotNode struct {
 	Pos
 	left  expr
 	right expr
+}
+
+func (node *dotNode) Left() node {
+	return node.left
+}
+
+func (node *dotNode) Right() node {
+	return node.right
 }
 
 type identifierNode struct {
@@ -1332,7 +1364,7 @@ func parseExpr8(p *parser) (expr, bool) {
 		return nil, false
 	}
 	for {
-		if p.acceptNosp(tokenSqOpen) {
+		if p.accept(tokenSqOpen) {
 			npos := p.token.pos
 			if p.acceptNosp(tokenColon) {
 				node := &sliceNode{}
@@ -1386,7 +1418,7 @@ func parseExpr8(p *parser) (expr, bool) {
 				}
 			}
 
-		} else if p.acceptNosp(tokenPOpen) {
+		} else if p.accept(tokenPOpen) {
 			node := &callNode{}
 			node.Pos = p.token.pos
 			node.left = left
@@ -1412,7 +1444,7 @@ func parseExpr8(p *parser) (expr, bool) {
 			}
 			left = node
 
-		} else if p.acceptNosp(tokenDot) {
+		} else if p.accept(tokenDot) {
 			dot := p.token
 			if !p.acceptNosp(tokenIdentifier) {
 				p.emitErrorf("")
