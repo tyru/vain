@@ -140,8 +140,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newStringNodeReader(n, level)
 	case *listNode:
 		return t.newListNodeReader(n, level)
-	// case *dictionaryNode:
-	// 	return t.newDictionaryNodeReader(n, level)
+	case *dictionaryNode:
+		return t.newDictionaryNodeReader(n, level)
 	case *optionNode:
 		return t.newLiteralNodeReader(n, level, "option")
 	case *envNode:
@@ -278,6 +278,28 @@ func (t *sexpTranslator) newListNodeReader(node *listNode, level int) io.Reader 
 			return &errorReader{err}
 		}
 		args = append(args, arg.String())
+	}
+	s := "(" + strings.Join(args, " ") + ")"
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newDictionaryNodeReader(node *dictionaryNode, level int) io.Reader {
+	args := make([]string, 0, len(node.value)+1)
+	args = append(args, "dict")
+	for i := range node.value {
+		keyNode := node.value[i][0]
+		var key bytes.Buffer
+		_, err := io.Copy(&key, t.toReader(keyNode, level))
+		if err != nil {
+			return &errorReader{err}
+		}
+		valNode := node.value[i][1]
+		var val bytes.Buffer
+		_, err = io.Copy(&val, t.toReader(valNode, level))
+		if err != nil {
+			return &errorReader{err}
+		}
+		args = append(args, fmt.Sprintf("(%s %s)", key.String(), val.String()))
 	}
 	s := "(" + strings.Join(args, " ") + ")"
 	return strings.NewReader(s)

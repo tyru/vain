@@ -35,6 +35,9 @@
 [1,2]
 [1,2,]
 [1,[2,[3]]]
+{}
+{key: 'value'}
+{'key': 'value'}
 foo.bar
 foo[bar]
 foo["bar"]
