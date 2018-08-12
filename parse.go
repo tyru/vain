@@ -1606,7 +1606,7 @@ func parseExpr9(p *parser) (expr, bool) {
 		var m [][]expr
 		p.acceptSpaces()
 		if !p.accept(tokenCClose) {
-			m := make([][]expr, 0, 16)
+			m = make([][]expr, 0, 16)
 			for {
 				pair := []expr{nil, nil}
 				p.acceptSpaces()
