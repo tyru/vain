@@ -1455,7 +1455,7 @@ func parseExpr8(p *parser) (expr, bool) {
 			node := &callNode{}
 			node.Pos = p.token.pos
 			node.left = left
-			node.rlist = make([]expr, 8)
+			node.rlist = make([]expr, 0, 8)
 			p.acceptSpaces()
 			if !p.accept(tokenPClose) {
 				for {
