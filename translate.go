@@ -132,8 +132,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	// 	return t.newSubscriptNodeReader(n, level)
 	// case *dotNode:
 	// 	return t.newDotNodeReader(n, level)
-	// case *identifierNode:
-	// 	return t.newIdentifierNodeReader(n, level)
+	case *identifierNode:
+		return t.newIdentifierNodeReader(n, level)
 	case *numberNode:
 		return t.newNumberNodeReader(n, level)
 	case *stringNode:
@@ -252,6 +252,10 @@ func (t *sexpTranslator) newBinaryOpNodeReader(node binaryOpNode, level int, ops
 		r := strings.NewReader(fmt.Sprintf("(%s %s %s)", opstr, left.String(), right.String()))
 		return r, 0, nil
 	}}
+}
+
+func (t *sexpTranslator) newIdentifierNodeReader(node *identifierNode, level int) io.Reader {
+	return strings.NewReader(node.value)
 }
 
 func (t *sexpTranslator) newNumberNodeReader(node *numberNode, level int) io.Reader {
