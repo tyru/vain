@@ -202,22 +202,22 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		bodyList = append(bodyList, buf.String())
 	}
 
-	var s string
-	if f.bodyIsStmt {
-		s = fmt.Sprintf("%s(func (%s) %s (%s) (%s))",
-			t.getIndent(level),
-			strings.Join(f.mods, " "),
-			f.name,
-			strings.Join(args, " "),
-			strings.Join(bodyList, " "))
+	// TODO Check len(bodyList) == 1 when f.bodyIsStmt == false in analyzer.
+	var body string
+	if len(bodyList) > 0 {
+		body = bodyList[0]
 	} else {
-		s = fmt.Sprintf("%s(func (%s) %s (%s) %s)",
-			t.getIndent(level),
-			strings.Join(f.mods, " "),
-			f.name,
-			strings.Join(args, " "),
-			bodyList[0])
+		body = "null"
 	}
+	if f.bodyIsStmt {
+		body = "(" + strings.Join(bodyList, " ") + ")"
+	}
+	s := fmt.Sprintf("%s(func (%s) %s (%s) %s)",
+		t.getIndent(level),
+		strings.Join(f.mods, " "),
+		f.name,
+		strings.Join(args, " "),
+		body)
 	return strings.NewReader(s)
 }
 

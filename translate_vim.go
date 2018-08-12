@@ -176,7 +176,8 @@ func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node, level int)
 		if f.name != "" {
 			return t.newFuncStmtReader(f, level)
 		}
-		if len(f.body) == 0 { // Cannot convert to lambda.
+		// TODO Check len(f.body) == 1 here in analyzer.
+		if len(f.body) == 0 {
 			return emptyReader
 		}
 		return t.newLambdaReader(f, parent, level)
@@ -190,7 +191,8 @@ func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node, level int)
 		name := t.getFuncName(f, autoload, global)
 		return strings.NewReader(fmt.Sprintf("function('%s')", name))
 	}
-	if len(f.body) == 0 { // Cannot convert to lambda.
+	// TODO Check len(f.body) == 1 here in analyzer.
+	if len(f.body) == 0 {
 		return emptyReader
 	}
 	return t.newLambdaReader(f, parent, level)
