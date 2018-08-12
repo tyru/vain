@@ -216,8 +216,13 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 
 func (t *sexpTranslator) newTernaryNodeReader(node *ternaryNode, level int) io.Reader {
 	return &lazyReader{init: func() (io.Reader, int, error) {
+		var cond bytes.Buffer
+		n, err := io.Copy(&cond, t.toReader(node.cond, level))
+		if err != nil {
+			return nil, int(n), err
+		}
 		var left bytes.Buffer
-		n, err := io.Copy(&left, t.toReader(node.left, level))
+		n, err = io.Copy(&left, t.toReader(node.left, level))
 		if err != nil {
 			return nil, int(n), err
 		}
@@ -226,7 +231,8 @@ func (t *sexpTranslator) newTernaryNodeReader(node *ternaryNode, level int) io.R
 		if err != nil {
 			return nil, int(n), err
 		}
-		r := strings.NewReader(fmt.Sprintf("(?: %v %v)", left.String(), right.String()))
+		s := fmt.Sprintf("(?: %v %v %v)", cond.String(), left.String(), right.String())
+		r := strings.NewReader(s)
 		return r, 0, nil
 	}}
 }
