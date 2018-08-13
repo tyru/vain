@@ -50,6 +50,7 @@ foo.bar.baz(42, "hello", [123], {key: 42})
 arr[0:1]
 arr[:1]
 arr[0:]
-arr[from:to]
-arr[:to]
-arr[from:]
+arr[begin:end]
+arr[:end]
+arr[begin:]
+{from: 'reserved word becomes key'}

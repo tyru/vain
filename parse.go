@@ -150,6 +150,15 @@ func (p *parser) acceptSpaces() bool {
 	return false
 }
 
+// acceptIdentifierLike accepts token where canBeIdentifier(token) == true
+func (p *parser) acceptIdentifierLike() bool {
+	if p.canBeIdentifier(p.peek()) {
+		p.next()
+		return true
+	}
+	return false
+}
+
 type topLevelNode struct {
 	Pos
 	Line
@@ -191,9 +200,31 @@ func parseStmtOrExpr(p *parser) (node, bool) {
 		p.backup(p.token)
 		return acceptFunction(p, false)
 	}
+	if p.accept(tokenReturn) {
+		ret := p.token
+		expr, ok := parseExpr(p)
+		if !ok {
+			return nil, false
+		}
+		return &returnStatement{ret.pos, ret.line, expr}, true
+	}
 
 	// Expression
 	return parseExpr(p)
+}
+
+type returnStatement struct {
+	Pos
+	Line
+	left expr
+}
+
+func (node *returnStatement) IsExpr() bool {
+	return false
+}
+
+func (node *returnStatement) Value() node {
+	return node.left
 }
 
 type importStatement struct {
@@ -1755,12 +1786,11 @@ func (node *regNode) Value() string {
 // expr9: number /
 //        (string ABNF is too complex! e.g. "string\n", 'str''ing') /
 //        "[" *LF *( expr1 *LF "," *LF ) "]" /
-//        "{" *LF *( ( identifier | expr1 ) *LF ":" *LF expr1 *LF "," *LF ) "}" /
+//        "{" *LF *( ( identifierLike | expr1 ) *LF ":" *LF expr1 *LF "," *LF ) "}" /
 //        &option /
 //        "(" *LF expr1 *LF ")" /
 //        function /
 //        identifier /
-//        identifierLike /
 //        $VAR /
 //        @r
 func parseExpr9(p *parser) (expr, bool) {
@@ -1874,10 +1904,6 @@ func parseExpr9(p *parser) (expr, bool) {
 	} else if p.accept(tokenIdentifier) {
 		node := &identifierNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
-	} else if p.canBeIdentifier(p.peek()) {
-		token := p.next()
-		node := &identifierNode{token.pos, token.line, token.val}
-		return node, true
 	} else if p.accept(tokenEnv) {
 		node := &envNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
@@ -1889,7 +1915,7 @@ func parseExpr9(p *parser) (expr, bool) {
 	return nil, false
 }
 
-// identifierLike
+// identifierLike := identifier | <value matches with '^\h\w*$'>
 func (p *parser) canBeIdentifier(t *token) bool {
 	if t.typ == tokenIdentifier {
 		return true

@@ -34,7 +34,7 @@ endfunction
 function! s:f13() abort
 " 42
 endfunction
-" {->return}
+" {->return 42}
 " {->1}
 " {->2}
 " 
@@ -55,7 +55,7 @@ endfunction
 " function('s:expr11')
 " function('s:expr12')
 " function('s:expr13')
-" {->return}
+" {->return 42}
 " {->1}
 " {->2}
 " 

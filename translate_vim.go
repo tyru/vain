@@ -70,6 +70,8 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 		return t.newImportStatementReader(n, parent, level)
 	case *funcStmtOrExpr:
 		return t.newFuncReader(n, parent, level)
+	case *returnStatement:
+		return t.newReturnNodeReader(n, parent, level)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, parent, level)
 	case *orNode:
@@ -308,6 +310,16 @@ func (t *vimTranslator) convertModifiers(mods []string) (autoload, global bool, 
 	return
 }
 
+func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, level int) io.Reader {
+	var value bytes.Buffer
+	_, err := io.Copy(&value, t.toReader(node.Value(), parent, level))
+	if err != nil {
+		return t.err(err, node.Value())
+	}
+	s := fmt.Sprintf("return %s", t.paren(value.String(), node.Value()))
+	return strings.NewReader(s)
+}
+
 func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node, level int) io.Reader {
 	var cond bytes.Buffer
 	_, err := io.Copy(&cond, t.toReader(node.cond, parent, level))
@@ -525,6 +537,8 @@ func (t *vimTranslator) needsParen(node node) bool {
 	case *importStatement:
 		return false
 	case *funcStmtOrExpr:
+		return false
+	case *returnStatement:
 		return false
 	case *ternaryNode:
 		return true

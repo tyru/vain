@@ -57,6 +57,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newImportStatementReader(n, level)
 	case *funcStmtOrExpr:
 		return t.newFuncReader(n, level)
+	case *returnStatement:
+		return t.newUnaryOpNodeReader(n, level, "return")
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, level)
 	case *orNode:
