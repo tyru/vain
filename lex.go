@@ -595,52 +595,85 @@ func lexString(l *lexer) lexStateFn {
 }
 
 // A string literal is same as Vim script.
-// "foo" (foo)
-// 'bar' (bar)
-// 'foo"bar' (foo"bar)
-// "foo'bar" (foo'bar)
-// "foo\"bar" (foo"bar)
-// 'foo''bar' (foo'bar)
-// "foo\\bar" (foo\bar)
-// 'foo\bar' (foo\bar)
 func acceptString(l *lexer) error {
-	l.save()
-	var double bool
 	if l.accept("'") {
-		double = false
+		l.backup()
+		return acceptSquoteString(l)
 	} else if l.accept("\"") {
-		double = true
+		l.backup()
+		return acceptDquoteString(l)
 	} else {
-		return errors.New("expected string literal")
+		return errors.New("failed to parse string literal")
+	}
+}
+
+// acceptSquoteString accepts single-quoted string literal.
+//   'bar' (bar)
+//   'foo"bar' (foo"bar)
+//   'foo''bar' (foo'bar)
+//   'foo\bar' (foo\bar)
+func acceptSquoteString(l *lexer) error {
+	if !l.accept("'") {
+		return errors.New("expected single quote")
 	}
 	for {
-		switch l.next() {
-		case eof:
-			l.restore()
+		if l.accept("'") {
+			if l.accept("'") {
+				continue
+			}
+			return nil
+		}
+		// Otherwise, read one character.
+		if l.next() == eof {
 			return errors.New("unexpected EOF in string literal")
-		case '\\':
-			if double && l.next() == eof {
-				l.restore()
-				return errors.New("unexpected EOF in string literal")
+		}
+	}
+	// never reach here
+}
+
+// acceptDquoteString accepts double-quoted string literal.
+//   "foo" (foo)
+//   "foo'bar" (foo'bar)
+//   "foo\"bar" (foo"bar)
+//   "foo\\bar" (foo\bar)
+func acceptDquoteString(l *lexer) error {
+	if !l.accept("\"") {
+		return errors.New("expected double quote")
+	}
+	for {
+		if l.accept("\"") {
+			return nil
+		} else if l.accept("\\") {
+			if l.accept("\"") {
+				return errors.New("unterminated string literal")
 			}
-		case '"':
-			if double { // end
-				return nil
+			if l.accept("\\") { // double backslashes
+			} else if l.accept("befnrt") { // BEL, ESC, FF, NL, CR, HT
+			} else if l.accept("Xx") { // Hex
+				// 0-2 digits are allowed (:help expr-quote)
+				// But "\x" is evaluated to "x".
+				l.accept("0123456789abcdefABCDEF")
+				l.accept("0123456789abcdefABCDEF")
+			} else if l.accept("Uu") { // Unicode
+				// 0-4 digits are allowed (:help expr-quote)
+				// But "\u" is evaluated to "u".
+				l.accept("0123456789abcdefABCDEF")
+				l.accept("0123456789abcdefABCDEF")
+				l.accept("0123456789abcdefABCDEF")
+				l.accept("0123456789abcdefABCDEF")
+			} else if l.accept("01234567") { // Octal
+				l.accept("01234567")
+				l.accept("01234567") // 1-3 digits are allowed (:help expr-quote)
+			} else if l.accept("<") { // Special key, e.g.: "\<C-W>"
+				// TODO
+			} else { // allow non-escape sequence like "\a" (= "a")
+				l.next()
 			}
-		case '\'':
-			if double {
-				continue
-			}
-			switch l.next() {
-			case eof:
-				l.restore()
-				return errors.New("unexpected EOF in string literal")
-			case '\'':
-				continue
-			default: // end
-				l.backup()
-				return nil
-			}
+			continue
+		}
+		// Otherwise, read one character.
+		if l.next() == eof {
+			return errors.New("unexpected EOF in string literal")
 		}
 	}
 	// never reach here
