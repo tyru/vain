@@ -52,7 +52,10 @@ func (t *vimTranslator) errParse(node *errorNode) io.Reader {
 }
 
 func (t *vimTranslator) err(err error, node node) io.Reader {
-	return &errorReader{fmt.Errorf("[translate/vim] %s:%d: "+err.Error(), t.name, node.LineNum())}
+	pos := node.Position()
+	return &errorReader{
+		fmt.Errorf("[translate/vim] %s:%d:%d: "+err.Error(), t.name, pos.line, pos.col+1),
+	}
 }
 
 func (t *vimTranslator) getIndent(level int) string {

@@ -39,7 +39,10 @@ func (t *sexpTranslator) errParse(node *errorNode) io.Reader {
 }
 
 func (t *sexpTranslator) err(err error, node node) io.Reader {
-	return &errorReader{fmt.Errorf("[translate/sexp] %s:%d: "+err.Error(), t.name, node.LineNum())}
+	pos := node.Position()
+	return &errorReader{
+		fmt.Errorf("[translate/sexp] %s:%d:%d: "+err.Error(), t.name, pos.line, pos.col+1),
+	}
 }
 
 func (t *sexpTranslator) getIndent(level int) string {

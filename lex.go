@@ -12,37 +12,38 @@ import (
 //   https://talks.golang.org/2011/lex.slide
 
 type lexer struct {
-	name    string     // used only for error reports.
-	input   string     // the string being scanned.
-	start   Pos        // start position of this item.
-	pos     Pos        // current position in the input.
-	width   int        // width of last rune read from input.
-	prevPos Pos        // previous position to restore.
-	tokens  chan token // channel of scanned items.
-	line    Line       // 1+number of newlines seen.
+	name    string     // Used only for error reports.
+	input   string     // The string being scanned.
+	start   int        // Start position of this item.
+	offset  int        // Current position in the input.
+	width   int        // Width of last rune read from input.
+	prevPos int        // Previous position to restore.
+	tokens  chan token // Channel of scanned items.
+	line    int        // The line number of this item (1-origin).
+	col     int        // The offset from the previous newline (0-origin).
 }
 
 type token struct {
-	typ  tokenType // The type of this item.
-	pos  Pos       // The starting position, in bytes, of this item in the input string.
-	val  string    // The value of this item.
-	line Line      // The line number of this item.
+	typ tokenType // The type of this item.
+	pos Pos       // The offset position from start of the file.
+	val string    // The value of this item.
 }
 
-// Pos is offset byte position from start of the file.
-type Pos int
+// Pos is offset position from start of the file.
+type Pos struct {
+	offset int // Current position in the input.
+	line   int // The line number of this item (1-origin).
+	col    int // The offset from the previous newline (0-origin).
+}
 
 // Position returns pos itself.
 func (p Pos) Position() Pos {
 	return p
 }
 
-// Line is 1+number of newlines seen.
-type Line int
-
-// LineNum returns line itself.
-func (l Line) LineNum() Line {
-	return l
+// Line returns line.
+func (p Pos) Line() int {
+	return p.line
 }
 
 type tokenType int
@@ -265,7 +266,7 @@ func (l *lexer) Run() {
 const eof = -1
 
 func (l *lexer) eof() bool {
-	return int(l.pos) >= len(l.input)
+	return l.offset >= len(l.input)
 }
 
 // next returns the next rune in the input.
@@ -274,10 +275,13 @@ func (l *lexer) next() (r rune) {
 		return eof
 	}
 	r, l.width =
-		utf8.DecodeRuneInString(l.input[l.pos:])
-	l.pos = Pos(int(l.pos) + l.width)
+		utf8.DecodeRuneInString(l.input[l.offset:])
+	l.offset += l.width
 	if r == '\n' {
 		l.line++
+		l.col = 0
+	} else {
+		l.col += l.width
 	}
 	return r
 }
@@ -301,9 +305,7 @@ func (l *lexer) nextRunBy(pred func(rune) bool) string {
 
 // ignore skips over the pending input before this point.
 func (l *lexer) ignore() {
-	l.start = l.pos
-	n := strings.Count(l.input[l.start:l.pos], "\n")
-	l.line = Line(int(l.line) + n)
+	l.start = l.offset
 }
 
 // ignoreRun skips over the pending input before this point.
@@ -324,7 +326,7 @@ func (l *lexer) acceptSpaces() rune {
 }
 
 func (l *lexer) emitNewlines() {
-	n := strings.Count(l.input[l.start:l.pos], "\n")
+	n := strings.Count(l.input[l.start:l.offset], "\n")
 	for i := 0; i < n; i++ {
 		l.emit(tokenNewline)
 	}
@@ -333,21 +335,36 @@ func (l *lexer) emitNewlines() {
 // backup steps back one rune.
 // Can be called only once per call of next.
 func (l *lexer) backup() {
-	l.pos = Pos(int(l.pos) - l.width)
+	l.offset -= l.width
 	// Correct newline count.
-	if l.width == 1 && l.input[l.pos] == '\n' {
+	if l.width == 1 && l.input[l.offset] == '\n' {
 		l.line--
+		l.recalcCol()
+	} else {
+		l.col -= l.width
+	}
+}
+
+// recalcCol recalculates l.col value from l.offset .
+func (l *lexer) recalcCol() {
+	nl := strings.LastIndexByte(l.input[:l.offset], '\n')
+	if nl >= 0 {
+		l.col = l.offset - nl
+	} else {
+		l.col = l.offset
 	}
 }
 
 // save saves current position.
 func (l *lexer) save() {
-	l.prevPos = l.pos
+	l.prevPos = l.offset
 }
 
 // restore restores previous position.
 func (l *lexer) restore() {
-	l.pos = l.prevPos
+	l.line -= strings.Count(l.input[l.prevPos:l.offset], "\n")
+	l.offset = l.prevPos
+	l.recalcCol()
 }
 
 // peek returns but does not consume
@@ -423,23 +440,23 @@ func (l *lexer) acceptKeyword(kw string, boundary bool) bool {
 
 // emit passes an token back to the client.
 func (l *lexer) emit(t tokenType) {
-	tok := token{t, l.start, l.input[l.start:l.pos], l.line}
-	l.tokens <- tok
-	l.start = l.pos
+	pos := Pos{l.offset, l.line, l.col}
+	l.tokens <- token{t, pos, l.input[l.start:l.offset]}
+	l.start = l.offset
 }
 
 // errorf returns an error token and terminates the scan
 // by passing back a nil pointer that will be the next
 // state, terminating l.Run.
 func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
-	newargs := make([]interface{}, 0, len(args)+2)
-	newargs = append(newargs, l.name, l.line)
+	newargs := make([]interface{}, 0, len(args)+3)
+	newargs = append(newargs, l.name, l.line, l.col+1)
 	newargs = append(newargs, args...)
+	pos := Pos{l.offset, l.line, l.col}
 	l.tokens <- token{
 		tokenError,
-		l.pos,
-		fmt.Sprintf("[lex] %s:%d: "+format, newargs...),
-		l.line,
+		pos,
+		fmt.Sprintf("[lex] %s:%d:%d: "+format, newargs...),
 	}
 	return nil
 }
