@@ -4,6 +4,14 @@
 " "hel'lo"
 " 'hel\nlo'
 " "\b\e\f\n\r\t"
+" "\x01"
+" "\x2"
+" "\x"
+" "\u0001"
+" "\u002"
+" "\u03"
+" "\u4"
+" "\u"
 " &autoindent
 " &g:autoindent
 " &l:autoindent
