@@ -76,13 +76,13 @@ func (p *parser) errorf(msg string, args ...interface{}) {
 	}
 	if msg == "" {
 		// TODO: Don't print callstack in future.
-		msg = fmt.Sprintf("%s:%d: fatal: unexpected token: %+v\n%s",
+		msg = fmt.Sprintf("[parse] %s:%d: fatal: unexpected token: %+v\n%s",
 			p.name, p.token.line, p.token, string(debug.Stack()))
 	} else {
 		newargs := make([]interface{}, 0, len(args)+2)
 		newargs = append(newargs, p.name, p.token.line)
 		newargs = append(newargs, args...)
-		msg = fmt.Sprintf("%s:%d: "+msg, newargs...)
+		msg = fmt.Sprintf("[parse] %s:%d: "+msg, newargs...)
 	}
 	p.emit(&errorNode{p.token.pos, p.token.line, errors.New(msg)})
 }

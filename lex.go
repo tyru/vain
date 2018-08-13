@@ -302,10 +302,13 @@ func (l *lexer) emit(t tokenType) {
 // by passing back a nil pointer that will be the next
 // state, terminating l.Run.
 func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
+	newargs := make([]interface{}, 0, len(args)+2)
+	newargs = append(newargs, l.name, l.line)
+	newargs = append(newargs, args...)
 	l.tokens <- token{
 		tokenError,
 		l.pos,
-		fmt.Sprintf(format, args...),
+		fmt.Sprintf("[lex] %s:%d: "+format, newargs...),
 		l.line,
 	}
 	return nil
