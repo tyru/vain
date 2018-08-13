@@ -34,6 +34,14 @@ func (t *sexpTranslator) emit(r io.Reader) {
 	t.readers <- r
 }
 
+func (t *sexpTranslator) errParse(node *errorNode) io.Reader {
+	return &errorReader{node.err}
+}
+
+func (t *sexpTranslator) err(err error, node node) io.Reader {
+	return &errorReader{fmt.Errorf("[translate/sexp] %s:%d: "+err.Error(), t.name, node.LineNum())}
+}
+
 func (t *sexpTranslator) getIndent(level int) string {
 	return strings.Repeat(t.indent, level)
 }
@@ -42,7 +50,7 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
 	switch n := node.(type) {
 	case *errorNode:
-		return &errorReader{n.err}
+		return t.errParse(n)
 	case *topLevelNode:
 		return t.newTopLevelNodeReader(n, level)
 	case *importStatement:
@@ -138,7 +146,7 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	case *regNode:
 		return t.newLiteralNodeReader(n, level, "reg")
 	default:
-		return &errorReader{fmt.Errorf("unknown node: %+v", node)}
+		return t.err(fmt.Errorf("unknown node: %+v", node), node)
 	}
 }
 
@@ -158,7 +166,7 @@ func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level i
 	args := make([]string, 0, 2)
 	pkg, err := t.toJSONString(&stmt.pkg)
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, stmt)
 	}
 	pkgPair := make([]string, 0, 2)
 	pkgPair = append(pkgPair, pkg)
@@ -189,7 +197,7 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 			var buf bytes.Buffer
 			_, err := io.Copy(&buf, t.toReader(arg.defaultVal, level+1))
 			if err != nil {
-				return &errorReader{err}
+				return t.err(err, f)
 			}
 			args = append(args, fmt.Sprintf("(%s = %s)", arg.name, buf.String()))
 		}
@@ -199,14 +207,14 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		var buf bytes.Buffer
 		_, err := io.Copy(&buf, t.toReader(f.body[i], level+1))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, f.body[i])
 		}
 		bodyList = append(bodyList, buf.String())
 	}
 
 	vs, err := unevalString(f.retType)
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, f)
 	}
 	retType, err := t.toJSONString(vs)
 
@@ -234,17 +242,17 @@ func (t *sexpTranslator) newTernaryNodeReader(node *ternaryNode, level int) io.R
 	var cond bytes.Buffer
 	_, err := io.Copy(&cond, t.toReader(node.cond, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.cond)
 	}
 	var left bytes.Buffer
 	_, err = io.Copy(&left, t.toReader(node.left, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	var right bytes.Buffer
 	_, err = io.Copy(&right, t.toReader(node.right, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.right)
 	}
 	s := fmt.Sprintf("(?: %s %s %s)", cond.String(), left.String(), right.String())
 	return strings.NewReader(s)
@@ -254,12 +262,12 @@ func (t *sexpTranslator) newBinaryOpNodeReader(node binaryOpNode, level int, ops
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.Left(), level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.Left())
 	}
 	var right bytes.Buffer
 	_, err = io.Copy(&right, t.toReader(node.Right(), level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.Right())
 	}
 	s := fmt.Sprintf("(%s %s %s)", opstr, left.String(), right.String())
 	return strings.NewReader(s)
@@ -269,7 +277,7 @@ func (t *sexpTranslator) newUnaryOpNodeReader(node unaryOpNode, level int, opstr
 	var value bytes.Buffer
 	_, err := io.Copy(&value, t.toReader(node.Value(), level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.Value())
 	}
 	s := fmt.Sprintf("(%s %s)", opstr, value.String())
 	return strings.NewReader(s)
@@ -279,14 +287,14 @@ func (t *sexpTranslator) newSliceNodeReader(node *sliceNode, level int) io.Reade
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	from := "null"
 	if node.rlist[0] != nil {
 		var buf bytes.Buffer
 		_, err := io.Copy(&buf, t.toReader(node.rlist[0], level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.rlist[0])
 		}
 		from = buf.String()
 	}
@@ -295,7 +303,7 @@ func (t *sexpTranslator) newSliceNodeReader(node *sliceNode, level int) io.Reade
 		var buf bytes.Buffer
 		_, err := io.Copy(&buf, t.toReader(node.rlist[1], level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.rlist[1])
 		}
 		to = buf.String()
 	}
@@ -307,14 +315,14 @@ func (t *sexpTranslator) newCallNodeReader(node *callNode, level int) io.Reader 
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	rlist := make([]string, 0, len(node.rlist))
 	for i := range node.rlist {
 		var arg bytes.Buffer
 		_, err := io.Copy(&arg, t.toReader(node.rlist[i], level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.rlist[i])
 		}
 		rlist = append(rlist, arg.String())
 	}
@@ -342,7 +350,7 @@ func (t *sexpTranslator) newFloatNodeReader(node *floatNode, level int) io.Reade
 func (t *sexpTranslator) newStringNodeReader(node *stringNode, level int) io.Reader {
 	value, err := t.toJSONString(&node.value)
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node)
 	}
 	return strings.NewReader(value)
 }
@@ -350,7 +358,7 @@ func (t *sexpTranslator) newStringNodeReader(node *stringNode, level int) io.Rea
 func (t *sexpTranslator) newLiteralNodeReader(node literalNode, level int, opstr string) io.Reader {
 	value, err := json.Marshal(node.Value())
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node)
 	}
 	s := fmt.Sprintf("(%s %s)", opstr, value)
 	return strings.NewReader(s)
@@ -363,7 +371,7 @@ func (t *sexpTranslator) newListNodeReader(node *listNode, level int) io.Reader 
 		var arg bytes.Buffer
 		_, err := io.Copy(&arg, t.toReader(node.value[i], level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.value[i])
 		}
 		args = append(args, arg.String())
 	}
@@ -379,13 +387,13 @@ func (t *sexpTranslator) newDictionaryNodeReader(node *dictionaryNode, level int
 		var key bytes.Buffer
 		_, err := io.Copy(&key, t.toReader(keyNode, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, keyNode)
 		}
 		valNode := node.value[i][1]
 		var val bytes.Buffer
 		_, err = io.Copy(&val, t.toReader(valNode, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, valNode)
 		}
 		args = append(args, fmt.Sprintf("(%s %s)", key.String(), val.String()))
 	}

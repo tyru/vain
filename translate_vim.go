@@ -47,6 +47,14 @@ func (t *vimTranslator) emit(r io.Reader) {
 	t.readers <- r
 }
 
+func (t *vimTranslator) errParse(node *errorNode) io.Reader {
+	return &errorReader{node.err}
+}
+
+func (t *vimTranslator) err(err error, node node) io.Reader {
+	return &errorReader{fmt.Errorf("[translate/vim] %s:%d: "+err.Error(), t.name, node.LineNum())}
+}
+
 func (t *vimTranslator) getIndent(level int) string {
 	return strings.Repeat(t.indent, level)
 }
@@ -55,7 +63,7 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
 	switch n := node.(type) {
 	case *errorNode:
-		return &errorReader{n.err}
+		return t.errParse(n)
 	case *topLevelNode:
 		return t.newTopLevelNodeReader(n, level)
 	case *importStatement:
@@ -151,7 +159,7 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 	case *regNode:
 		return t.newLiteralNodeReader(n, parent, level, "@")
 	default:
-		return &errorReader{fmt.Errorf("unknown node: %+v", node)}
+		return t.err(fmt.Errorf("unknown node: %+v", node), node)
 	}
 }
 
@@ -251,7 +259,7 @@ func (t *vimTranslator) newFuncStmtReader(f *funcStmtOrExpr, level int) io.Reade
 		r := t.toExcmd(f.body[i], f, level)
 		_, err := io.Copy(&buf, r)
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, f.body[i])
 		}
 		buf.WriteString("\n")
 	}
@@ -271,7 +279,7 @@ func (t *vimTranslator) newLambdaReader(f *funcStmtOrExpr, parent node, level in
 	buf.WriteString("->")
 	_, err := io.Copy(&buf, t.toReader(f.body[0], parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, f.body[0])
 	}
 	buf.WriteString("}")
 	return strings.NewReader(buf.String())
@@ -304,17 +312,17 @@ func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node, lev
 	var cond bytes.Buffer
 	_, err := io.Copy(&cond, t.toReader(node.cond, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.cond)
 	}
 	var left bytes.Buffer
 	_, err = io.Copy(&left, t.toReader(node.left, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	var right bytes.Buffer
 	_, err = io.Copy(&right, t.toReader(node.right, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.right)
 	}
 	s := fmt.Sprintf("%s ? %s : %s",
 		t.paren(cond.String(), node.cond),
@@ -327,12 +335,12 @@ func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node, le
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.Left(), parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.Left())
 	}
 	var right bytes.Buffer
 	_, err = io.Copy(&right, t.toReader(node.Right(), parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.Right())
 	}
 	s := fmt.Sprintf("%s %s %s",
 		t.paren(left.String(), node.Left()),
@@ -345,7 +353,7 @@ func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node, leve
 	var value bytes.Buffer
 	_, err := io.Copy(&value, t.toReader(node.Value(), parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.Value())
 	}
 	s := fmt.Sprintf("%s%s", opstr, t.paren(value.String(), node.Value()))
 	return strings.NewReader(s)
@@ -355,14 +363,14 @@ func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node, level i
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	from := "null"
 	if node.rlist[0] != nil {
 		var buf bytes.Buffer
 		_, err := io.Copy(&buf, t.toReader(node.rlist[0], parent, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.rlist[0])
 		}
 		from = buf.String()
 	}
@@ -371,7 +379,7 @@ func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node, level i
 		var buf bytes.Buffer
 		_, err := io.Copy(&buf, t.toReader(node.rlist[1], parent, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.rlist[1])
 		}
 		to = buf.String()
 	}
@@ -386,14 +394,14 @@ func (t *vimTranslator) newCallNodeReader(node *callNode, parent node, level int
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	rlist := make([]string, 0, len(node.rlist))
 	for i := range node.rlist {
 		var arg bytes.Buffer
 		_, err := io.Copy(&arg, t.toReader(node.rlist[i], parent, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.rlist[i])
 		}
 		rlist = append(rlist, arg.String())
 	}
@@ -405,12 +413,12 @@ func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node,
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	var right bytes.Buffer
 	_, err = io.Copy(&right, t.toReader(node.right, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.right)
 	}
 	s := fmt.Sprintf("%s[%s]", t.paren(left.String(), node.left), right.String())
 	return strings.NewReader(s)
@@ -420,7 +428,7 @@ func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node, level int) 
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
 	if err != nil {
-		return &errorReader{err}
+		return t.err(err, node.left)
 	}
 	s := fmt.Sprintf("%s.%s", t.paren(left.String(), node.left), node.right.value)
 	return strings.NewReader(s)
@@ -452,7 +460,7 @@ func (t *vimTranslator) newListNodeReader(node *listNode, parent node, level int
 		var arg bytes.Buffer
 		_, err := io.Copy(&arg, t.toReader(node.value[i], parent, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, node.value[i])
 		}
 		args = append(args, arg.String())
 	}
@@ -468,20 +476,20 @@ func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent nod
 		if id, ok := keyNode.(*identifierNode); ok {
 			s, err := unevalString(id.value)
 			if err != nil {
-				return &errorReader{err}
+				return t.err(err, keyNode)
 			}
 			key.WriteString(string(*s))
 		} else {
 			_, err := io.Copy(&key, t.toReader(keyNode, parent, level))
 			if err != nil {
-				return &errorReader{err}
+				return t.err(err, keyNode)
 			}
 		}
 		var val bytes.Buffer
 		valNode := node.value[i][1]
 		_, err := io.Copy(&val, t.toReader(valNode, parent, level))
 		if err != nil {
-			return &errorReader{err}
+			return t.err(err, valNode)
 		}
 		args = append(args, fmt.Sprintf("%s:%s", key.String(), val.String()))
 	}
