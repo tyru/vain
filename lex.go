@@ -111,6 +111,8 @@ const (
 	tokenImport
 	tokenAs
 	tokenFrom
+	tokenIf
+	tokenElse
 )
 
 func tokenName(typ tokenType) string {
@@ -239,6 +241,10 @@ func tokenName(typ tokenType) string {
 		return "\"as\""
 	case tokenFrom:
 		return "\"from\""
+	case tokenIf:
+		return "\"if\""
+	case tokenElse:
+		return "\"else\""
 	}
 	return ""
 }
@@ -673,6 +679,12 @@ func lexTop(l *lexer) lexStateFn {
 		return lexTop
 	case "from":
 		l.emit(tokenFrom)
+		return lexTop
+	case "if":
+		l.emit(tokenIf)
+		return lexTop
+	case "else":
+		l.emit(tokenElse)
 		return lexTop
 	case "true", "false":
 		l.emit(tokenBool)

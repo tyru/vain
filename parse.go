@@ -174,6 +174,10 @@ func parseStmtOrExpr(p *parser) (node, bool) {
 		p.backup(p.token)
 		return acceptReturnStatement(p)
 	}
+	if p.accept(tokenIf) {
+		p.backup(p.token)
+		return acceptIfStatement(p)
+	}
 
 	// Expression
 	return parseExpr(p)
@@ -206,6 +210,87 @@ func acceptReturnStatement(p *parser) (node, bool) {
 		return nil, false
 	}
 	return &returnStatement{ret.pos, nil, expr}, true
+}
+
+type ifStatement struct {
+	*Pos
+	*Analysis
+	cond expr
+	body []node
+	els  []node
+}
+
+func (node *ifStatement) IsExpr() bool {
+	return false
+}
+
+// ifStatement := "if" expr *LF block
+//                [ *LF "else" *LF ( ifStatement | block ) ]
+func acceptIfStatement(p *parser) (node, bool) {
+	if !p.accept(tokenIf) {
+		p.errorf("expected if statement but got %s", tokenName(tokenIf), tokenName(p.peek().typ))
+		return nil, false
+	}
+	pos := p.token.pos
+	cond, ok := parseExpr(p)
+	if !ok {
+		return nil, false
+	}
+	p.acceptSpaces()
+	body, ok := acceptBlock(p)
+	if !ok {
+		return nil, false
+	}
+	var els []node
+	p.acceptSpaces()
+	if p.accept(tokenElse) {
+		p.acceptSpaces()
+		if p.accept(tokenIf) {
+			p.backup(p.token)
+			ifstmt, ok := acceptIfStatement(p)
+			if !ok {
+				return nil, false
+			}
+			els = []node{ifstmt}
+		} else if p.accept(tokenCOpen) {
+			p.backup(p.token)
+			block, ok := acceptBlock(p)
+			if !ok {
+				return nil, false
+			}
+			els = block
+		} else {
+			p.errorf("expected if or block statement but got %s", tokenName(p.peek().typ))
+			return nil, false
+		}
+	}
+	node := &ifStatement{pos, nil, cond, body, els}
+	return node, true
+}
+
+// block := "{" *LF *( statementOrExpression *LF ) "}"
+func acceptBlock(p *parser) ([]node, bool) {
+	if !p.accept(tokenCOpen) {
+		p.errorf("expected %s but got %s", tokenName(tokenCOpen), tokenName(p.peek().typ))
+		return nil, false
+	}
+	var nodes []node
+	p.acceptSpaces()
+	if !p.accept(tokenCClose) {
+		nodes = make([]node, 0, 16)
+		for {
+			stmt, ok := parseStmtOrExpr(p)
+			if !ok {
+				return nil, false
+			}
+			p.acceptSpaces()
+			nodes = append(nodes, stmt)
+			if p.accept(tokenCClose) {
+				break
+			}
+		}
+	}
+	return nodes, true
 }
 
 type importStatement struct {
@@ -318,7 +403,7 @@ func (node *funcStmtOrExpr) IsExpr() bool {
 
 // function :=
 //        "func" [ functionModifierList ] [ identifier ] functionCallSignature expr1 /
-//        "func" [ functionModifierList ] [ identifier ] functionCallSignature "{" *LF *( statementOrExpression *LF ) "}" /
+//        "func" [ functionModifierList ] [ identifier ] functionCallSignature block
 func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 	if !p.accept(tokenFunc) {
 		p.errorf("expected %s but got %s", tokenName(tokenFunc), tokenName(p.peek().typ))
@@ -356,27 +441,20 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 	}
 
 	// Body
-	body = make([]node, 0, 32)
 	if p.accept(tokenCOpen) {
+		p.backup(p.token)
 		bodyIsStmt = true
-		p.acceptSpaces()
-		for {
-			if p.accept(tokenCClose) {
-				break
-			}
-			node, ok := parseStmtOrExpr(p)
-			if !ok {
-				return nil, false
-			}
-			body = append(body, node)
-			p.acceptSpaces()
+		block, ok := acceptBlock(p)
+		if !ok {
+			return nil, false
 		}
+		body = block
 	} else {
 		expr, ok := parseExpr(p)
 		if !ok {
 			return nil, false
 		}
-		body = append(body, expr)
+		body = []node{expr}
 	}
 
 	f := &funcStmtOrExpr{pos, nil, isExpr, mods, name, args, retType, bodyIsStmt, body}

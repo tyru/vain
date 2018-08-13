@@ -62,6 +62,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newFuncReader(n, level)
 	case *returnStatement:
 		return t.newUnaryOpNodeReader(n, level, "return")
+	case *ifStatement:
+		return t.newIfStatementReader(n, level)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, level)
 	case *orNode:
@@ -240,6 +242,41 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		strings.Join(args, " "),
 		retType,
 		body)
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newIfStatementReader(node *ifStatement, level int) io.Reader {
+	var cond bytes.Buffer
+	_, err := io.Copy(&cond, t.toReader(node.cond, level))
+	if err != nil {
+		return t.err(err, node.cond)
+	}
+	var bodyList []string
+	for i := range node.body {
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, t.toReader(node.body[i], level))
+		if err != nil {
+			return t.err(err, node.body[i])
+		}
+		bodyList = append(bodyList, buf.String())
+	}
+	var s string
+	if node.els == nil {
+		s = fmt.Sprintf("(if %s (%s))",
+			cond.String(), strings.Join(bodyList, " "))
+	} else {
+		var elseList []string
+		for i := range node.els {
+			var buf bytes.Buffer
+			_, err = io.Copy(&buf, t.toReader(node.els[i], level))
+			if err != nil {
+				return t.err(err, node.els[i])
+			}
+			elseList = append(elseList, buf.String())
+		}
+		s = fmt.Sprintf("(if %s (%s) (%s))",
+			cond.String(), strings.Join(bodyList, " "), strings.Join(elseList, " "))
+	}
 	return strings.NewReader(s)
 }
 

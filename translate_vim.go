@@ -75,6 +75,8 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 		return t.newFuncReader(n, parent, level)
 	case *returnStatement:
 		return t.newReturnNodeReader(n, parent, level)
+	case *ifStatement:
+		return t.newIfStatementReader(n, parent, level, true)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, parent, level)
 	case *orNode:
@@ -311,6 +313,54 @@ func (t *vimTranslator) convertModifiers(mods []string) (autoload, global bool, 
 		newmods = append(newmods, "abort")
 	}
 	return
+}
+
+func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, level int, top bool) io.Reader {
+	var cond bytes.Buffer
+	_, err := io.Copy(&cond, t.toReader(node.cond, node, level))
+	if err != nil {
+		return t.err(err, node.cond)
+	}
+	var bodyList []string
+	for i := range node.body {
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, t.toReader(node.body[i], node, level))
+		if err != nil {
+			return t.err(err, node.body[i])
+		}
+		bodyList = append(bodyList, buf.String())
+	}
+	var buf bytes.Buffer
+	buf.WriteString("if ")
+	buf.WriteString(t.paren(cond.String(), node.cond))
+	buf.WriteString("\n")
+	for i := range bodyList {
+		buf.WriteString(bodyList[i])
+		buf.WriteString("\n")
+	}
+	if len(node.els) > 0 {
+		if ifstmt, ok := node.els[0].(*ifStatement); ok { // else if
+			buf.WriteString("else")
+			r := t.newIfStatementReader(ifstmt, node, level+1, false)
+			_, err = io.Copy(&buf, r)
+			if err != nil {
+				return t.err(err, node.els[0])
+			}
+		} else { // else
+			buf.WriteString("else\n")
+			for i := range node.els {
+				_, err = io.Copy(&buf, t.toReader(node.els[i], node, level))
+				if err != nil {
+					return t.err(err, node.els[i])
+				}
+				buf.WriteString("\n")
+			}
+		}
+	}
+	if top {
+		buf.WriteString("endif")
+	}
+	return strings.NewReader(buf.String())
 }
 
 func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, level int) io.Reader {
