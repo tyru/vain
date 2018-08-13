@@ -28,6 +28,7 @@ type nodeType int
 
 type node interface {
 	Position() Pos
+	LineNum() Line
 	IsExpr() bool
 }
 
@@ -41,6 +42,7 @@ type statement interface {
 
 type errorNode struct {
 	Pos
+	Line
 	err error
 }
 
@@ -82,14 +84,13 @@ func (p *parser) errorf(msg string, args ...interface{}) {
 		newargs = append(newargs, args...)
 		msg = fmt.Sprintf("%s:%d: "+msg, newargs...)
 	}
-	p.emit(&errorNode{err: errors.New(msg), Pos: p.token.pos})
+	p.emit(&errorNode{p.token.pos, p.token.line, errors.New(msg)})
 }
 
 // unexpectedEOF is called when tokenEOF was given and it's unexpected.
 func (p *parser) unexpectedEOF() {
-	p.emit(&errorNode{
-		err: fmt.Errorf("%s:%d: unexpected EOF", p.name, p.token.line),
-		Pos: p.token.pos,
+	p.emit(&errorNode{p.token.pos, p.token.line,
+		fmt.Errorf("%s:%d: unexpected EOF", p.name, p.token.line),
 	})
 }
 
@@ -151,6 +152,7 @@ func (p *parser) acceptSpaces() bool {
 
 type topLevelNode struct {
 	Pos
+	Line
 	body []node
 }
 
@@ -159,7 +161,7 @@ func (node *topLevelNode) IsExpr() bool {
 }
 
 func parseTopLevel(p *parser) (*topLevelNode, bool) {
-	toplevel := &topLevelNode{p.start, make([]node, 0, 32)}
+	toplevel := &topLevelNode{p.start, Line(1), make([]node, 0, 32)}
 	for {
 		node, ok := parseStmtOrExpr(p)
 		if !ok {
@@ -196,6 +198,7 @@ func parseStmtOrExpr(p *parser) (node, bool) {
 
 type importStatement struct {
 	Pos
+	Line
 	pkg      vainString
 	pkgAlias string
 	fnlist   [][]string
@@ -209,6 +212,8 @@ func (node *importStatement) IsExpr() bool {
 //                    "from" string "import" <importFunctionList>
 func acceptImportStatement(p *parser) (*importStatement, bool) {
 	if p.accept(tokenImport) {
+		pos := p.token.pos
+		line := p.token.line
 		if !p.accept(tokenString) {
 			p.errorf("")
 			return nil, false
@@ -223,10 +228,12 @@ func acceptImportStatement(p *parser) (*importStatement, bool) {
 			}
 			pkgAlias = p.token.val
 		}
-		stmt := &importStatement{p.start, pkg, pkgAlias, nil}
+		stmt := &importStatement{pos, line, pkg, pkgAlias, nil}
 		return stmt, true
 
 	} else if p.accept(tokenFrom) {
+		pos := p.token.pos
+		line := p.token.line
 		if !p.accept(tokenString) {
 			p.errorf("")
 			return nil, false
@@ -240,7 +247,7 @@ func acceptImportStatement(p *parser) (*importStatement, bool) {
 		if !ok {
 			return nil, false
 		}
-		stmt := &importStatement{p.start, pkg, "", fnlist}
+		stmt := &importStatement{pos, line, pkg, "", fnlist}
 		return stmt, true
 	}
 
@@ -284,6 +291,7 @@ func acceptImportFunctionList(p *parser) ([][]string, bool) {
 
 type funcStmtOrExpr struct {
 	Pos
+	Line
 	isExpr     bool
 	mods       []string
 	name       string
@@ -305,6 +313,8 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 		p.errorf("")
 		return nil, false
 	}
+	pos := p.token.pos
+	line := p.token.line
 
 	var mods []string
 	var name string
@@ -359,7 +369,7 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 		body = append(body, expr)
 	}
 
-	f := &funcStmtOrExpr{p.start, isExpr, mods, name, args, retType, bodyIsStmt, body}
+	f := &funcStmtOrExpr{pos, line, isExpr, mods, name, args, retType, bodyIsStmt, body}
 	return f, true
 }
 
@@ -499,6 +509,7 @@ func parseExpr(p *parser) (expr, bool) {
 
 type ternaryNode struct {
 	Pos
+	Line
 	cond  expr
 	left  expr
 	right expr
@@ -515,8 +526,7 @@ func parseExpr1(p *parser) (expr, bool) {
 		return nil, false
 	}
 	if p.accept(tokenQuestion) {
-		node := &ternaryNode{}
-		node.cond = left
+		node := &ternaryNode{p.token.pos, p.token.line, left, nil, nil}
 		expr, ok := parseExpr1(p)
 		if !ok {
 			return nil, false
@@ -544,6 +554,7 @@ type binaryOpNode interface {
 
 type orNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -568,9 +579,7 @@ func parseExpr2(p *parser) (expr, bool) {
 	}
 	for {
 		if p.accept(tokenOrOr) {
-			node := &orNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &orNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr3(p)
 			if !ok {
@@ -587,6 +596,7 @@ func parseExpr2(p *parser) (expr, bool) {
 
 type andNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -611,9 +621,7 @@ func parseExpr3(p *parser) (expr, bool) {
 	}
 	for {
 		if p.accept(tokenAndAnd) {
-			node := &andNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &andNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr4(p)
 			if !ok {
@@ -630,6 +638,7 @@ func parseExpr3(p *parser) (expr, bool) {
 
 type equalNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -648,6 +657,7 @@ func (node *equalNode) Right() node {
 
 type equalCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -666,6 +676,7 @@ func (node *equalCiNode) Right() node {
 
 type nequalNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -684,6 +695,7 @@ func (node *nequalNode) Right() node {
 
 type nequalCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -702,6 +714,7 @@ func (node *nequalCiNode) Right() node {
 
 type greaterNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -720,6 +733,7 @@ func (node *greaterNode) Right() node {
 
 type greaterCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -738,6 +752,7 @@ func (node *greaterCiNode) Right() node {
 
 type gequalNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -756,6 +771,7 @@ func (node *gequalNode) Right() node {
 
 type gequalCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -774,6 +790,7 @@ func (node *gequalCiNode) Right() node {
 
 type smallerNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -792,6 +809,7 @@ func (node *smallerNode) Right() node {
 
 type smallerCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -810,6 +828,7 @@ func (node *smallerCiNode) Right() node {
 
 type sequalNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -828,6 +847,7 @@ func (node *sequalNode) Right() node {
 
 type sequalCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -846,6 +866,7 @@ func (node *sequalCiNode) Right() node {
 
 type matchNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -864,6 +885,7 @@ func (node *matchNode) Right() node {
 
 type matchCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -882,6 +904,7 @@ func (node *matchCiNode) Right() node {
 
 type noMatchNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -900,6 +923,7 @@ func (node *noMatchNode) Right() node {
 
 type noMatchCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -918,6 +942,7 @@ func (node *noMatchCiNode) Right() node {
 
 type isNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -936,6 +961,7 @@ func (node *isNode) Right() node {
 
 type isCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -954,6 +980,7 @@ func (node *isCiNode) Right() node {
 
 type isNotNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -972,6 +999,7 @@ func (node *isNotNode) Right() node {
 
 type isNotCiNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1015,9 +1043,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		return nil, false
 	}
 	if p.accept(tokenEqEq) {
-		node := &equalNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &equalNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1026,9 +1052,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenEqEqCi) {
-		node := &equalCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &equalCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1037,9 +1061,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenNeq) {
-		node := &nequalNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &nequalNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1048,9 +1070,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenNeqCi) {
-		node := &nequalCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &nequalCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1059,9 +1079,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenGt) {
-		node := &greaterNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &greaterNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1070,9 +1088,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenGtCi) {
-		node := &greaterCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &greaterCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1081,9 +1097,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenGtEq) {
-		node := &gequalNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &gequalNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1092,9 +1106,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenGtEqCi) {
-		node := &gequalCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &gequalCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1103,9 +1115,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenLt) {
-		node := &smallerNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &smallerNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1114,9 +1124,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenLtCi) {
-		node := &smallerCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &smallerCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1125,9 +1133,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenLtEq) {
-		node := &sequalNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &sequalNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1136,9 +1142,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenLtEqCi) {
-		node := &sequalCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &sequalCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1147,9 +1151,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenMatch) {
-		node := &matchNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &matchNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1158,9 +1160,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenMatchCi) {
-		node := &matchCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &matchCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1169,9 +1169,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenNoMatch) {
-		node := &noMatchNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &noMatchNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1180,9 +1178,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenNoMatchCi) {
-		node := &noMatchCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &noMatchCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1191,9 +1187,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenIs) {
-		node := &isNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &isNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1202,9 +1196,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenIsCi) {
-		node := &isCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &isCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1213,9 +1205,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenIsNot) {
-		node := &isNotNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &isNotNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1224,9 +1214,7 @@ func parseExpr4(p *parser) (expr, bool) {
 		node.right = right
 		left = node
 	} else if p.accept(tokenIsNotCi) {
-		node := &isNotCiNode{}
-		node.Pos = p.token.pos
-		node.left = left
+		node := &isNotCiNode{p.token.pos, p.token.line, left, nil}
 		p.acceptSpaces()
 		right, ok := parseExpr5(p)
 		if !ok {
@@ -1240,6 +1228,7 @@ func parseExpr4(p *parser) (expr, bool) {
 
 type addNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1258,6 +1247,7 @@ func (node *addNode) Right() node {
 
 type subtractNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1284,9 +1274,7 @@ func parseExpr5(p *parser) (expr, bool) {
 	}
 	for {
 		if p.accept(tokenPlus) {
-			node := &addNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &addNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr6(p)
 			if !ok {
@@ -1295,9 +1283,7 @@ func parseExpr5(p *parser) (expr, bool) {
 			node.right = right
 			left = node
 		} else if p.accept(tokenMinus) {
-			node := &subtractNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &subtractNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr6(p)
 			if !ok {
@@ -1314,6 +1300,7 @@ func parseExpr5(p *parser) (expr, bool) {
 
 type multiplyNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1332,6 +1319,7 @@ func (node *multiplyNode) Right() node {
 
 type divideNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1350,6 +1338,7 @@ func (node *divideNode) Right() node {
 
 type remainderNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1377,9 +1366,7 @@ func parseExpr6(p *parser) (expr, bool) {
 	}
 	for {
 		if p.accept(tokenStar) {
-			node := &multiplyNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &multiplyNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr7(p)
 			if !ok {
@@ -1388,9 +1375,7 @@ func parseExpr6(p *parser) (expr, bool) {
 			node.right = right
 			left = node
 		} else if p.accept(tokenSlash) {
-			node := &divideNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &divideNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr7(p)
 			if !ok {
@@ -1399,9 +1384,7 @@ func parseExpr6(p *parser) (expr, bool) {
 			node.right = right
 			left = node
 		} else if p.accept(tokenPercent) {
-			node := &remainderNode{}
-			node.Pos = p.token.pos
-			node.left = left
+			node := &remainderNode{p.token.pos, p.token.line, left, nil}
 			p.acceptSpaces()
 			right, ok := parseExpr7(p)
 			if !ok {
@@ -1422,6 +1405,7 @@ type unaryOpNode interface {
 
 type notNode struct {
 	Pos
+	Line
 	left expr
 }
 
@@ -1435,6 +1419,7 @@ func (node *notNode) Value() node {
 
 type minusNode struct {
 	Pos
+	Line
 	left expr
 }
 
@@ -1448,6 +1433,7 @@ func (node *minusNode) Value() node {
 
 type plusNode struct {
 	Pos
+	Line
 	left expr
 }
 
@@ -1465,8 +1451,7 @@ func (node *plusNode) Value() node {
 //          expr8
 func parseExpr7(p *parser) (expr, bool) {
 	if p.accept(tokenNot) {
-		node := &notNode{}
-		node.Pos = p.token.pos
+		node := &notNode{p.token.pos, p.token.line, nil}
 		left, ok := parseExpr7(p)
 		if !ok {
 			return nil, false
@@ -1474,8 +1459,7 @@ func parseExpr7(p *parser) (expr, bool) {
 		node.left = left
 		return node, true
 	} else if p.accept(tokenMinus) {
-		node := &minusNode{}
-		node.Pos = p.token.pos
+		node := &minusNode{p.token.pos, p.token.line, nil}
 		left, ok := parseExpr7(p)
 		if !ok {
 			return nil, false
@@ -1483,8 +1467,7 @@ func parseExpr7(p *parser) (expr, bool) {
 		node.left = left
 		return node, true
 	} else if p.accept(tokenPlus) {
-		node := &plusNode{}
-		node.Pos = p.token.pos
+		node := &plusNode{p.token.pos, p.token.line, nil}
 		left, ok := parseExpr7(p)
 		if !ok {
 			return nil, false
@@ -1502,6 +1485,7 @@ func parseExpr7(p *parser) (expr, bool) {
 
 type sliceNode struct {
 	Pos
+	Line
 	left  expr
 	rlist []expr
 }
@@ -1512,6 +1496,7 @@ func (node *sliceNode) IsExpr() bool {
 
 type callNode struct {
 	Pos
+	Line
 	left  expr
 	rlist []expr
 }
@@ -1522,6 +1507,7 @@ func (node *callNode) IsExpr() bool {
 
 type subscriptNode struct {
 	Pos
+	Line
 	left  expr
 	right expr
 }
@@ -1540,6 +1526,7 @@ func (node *subscriptNode) Right() node {
 
 type dotNode struct {
 	Pos
+	Line
 	left  expr
 	right *identifierNode
 }
@@ -1558,6 +1545,7 @@ func (node *dotNode) Right() node {
 
 type identifierNode struct {
 	Pos
+	Line
 	value string
 }
 
@@ -1578,12 +1566,10 @@ func parseExpr8(p *parser) (expr, bool) {
 	for {
 		if p.accept(tokenSqOpen) {
 			npos := p.token.pos
+			nline := p.token.line
 			p.acceptSpaces()
 			if p.accept(tokenColon) {
-				node := &sliceNode{}
-				node.Pos = npos
-				node.left = left
-				node.rlist = []expr{nil, nil}
+				node := &sliceNode{npos, nline, left, []expr{nil, nil}}
 				p.acceptSpaces()
 				if p.peek().typ != tokenSqClose {
 					expr, ok := parseExpr1(p)
@@ -1604,10 +1590,7 @@ func parseExpr8(p *parser) (expr, bool) {
 				}
 				p.acceptSpaces()
 				if p.accept(tokenColon) {
-					node := &sliceNode{}
-					node.Pos = npos
-					node.left = left
-					node.rlist = []expr{right, nil}
+					node := &sliceNode{npos, nline, left, []expr{right, nil}}
 					p.acceptSpaces()
 					if p.peek().typ != tokenSqClose {
 						expr, ok := parseExpr1(p)
@@ -1622,10 +1605,7 @@ func parseExpr8(p *parser) (expr, bool) {
 					}
 					left = node
 				} else {
-					node := &subscriptNode{}
-					node.Pos = npos
-					node.left = left
-					node.right = right
+					node := &subscriptNode{npos, nline, left, right}
 					p.acceptSpaces()
 					if !p.accept(tokenSqClose) {
 						p.errorf("")
@@ -1635,10 +1615,7 @@ func parseExpr8(p *parser) (expr, bool) {
 				}
 			}
 		} else if p.accept(tokenPOpen) {
-			node := &callNode{}
-			node.Pos = p.token.pos
-			node.left = left
-			node.rlist = make([]expr, 0, 8)
+			node := &callNode{p.token.pos, p.token.line, left, make([]expr, 0, 8)}
 			p.acceptSpaces()
 			if !p.accept(tokenPClose) {
 				for {
@@ -1669,11 +1646,8 @@ func parseExpr8(p *parser) (expr, bool) {
 				p.errorf("")
 				return nil, false
 			}
-			node := &dotNode{}
-			node.Pos = dot.pos
-			node.left = left
-			node.right = &identifierNode{p.token.pos, p.token.val}
-			left = node
+			right := &identifierNode{p.token.pos, p.token.line, p.token.val}
+			left = &dotNode{dot.pos, dot.line, left, right}
 		} else {
 			break
 		}
@@ -1682,11 +1656,13 @@ func parseExpr8(p *parser) (expr, bool) {
 }
 
 type literalNode interface {
+	node
 	Value() string
 }
 
 type intNode struct {
 	Pos
+	Line
 	value string
 }
 
@@ -1696,6 +1672,7 @@ func (node *intNode) IsExpr() bool {
 
 type floatNode struct {
 	Pos
+	Line
 	value string
 }
 
@@ -1705,6 +1682,7 @@ func (node *floatNode) IsExpr() bool {
 
 type stringNode struct {
 	Pos
+	Line
 	value vainString
 }
 
@@ -1714,6 +1692,7 @@ func (node *stringNode) IsExpr() bool {
 
 type listNode struct {
 	Pos
+	Line
 	value []expr
 }
 
@@ -1723,6 +1702,7 @@ func (node *listNode) IsExpr() bool {
 
 type dictionaryNode struct {
 	Pos
+	Line
 	value [][]expr
 }
 
@@ -1732,6 +1712,7 @@ func (node *dictionaryNode) IsExpr() bool {
 
 type optionNode struct {
 	Pos
+	Line
 	value string
 }
 
@@ -1745,6 +1726,7 @@ func (node *optionNode) Value() string {
 
 type envNode struct {
 	Pos
+	Line
 	value string
 }
 
@@ -1758,6 +1740,7 @@ func (node *envNode) Value() string {
 
 type regNode struct {
 	Pos
+	Line
 	value string
 }
 
@@ -1782,27 +1765,16 @@ func (node *regNode) Value() string {
 //        @r
 func parseExpr9(p *parser) (expr, bool) {
 	if p.accept(tokenInt) {
-		node := &intNode{}
-		node.Pos = p.token.pos
-		node.value = p.token.val
+		node := &intNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
-
 	} else if p.accept(tokenFloat) {
-		node := &floatNode{}
-		node.Pos = p.token.pos
-		node.value = p.token.val
+		node := &floatNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
-
 	} else if p.accept(tokenString) {
-		node := &stringNode{}
-		node.Pos = p.token.pos
-		node.value = vainString(p.token.val)
+		node := &stringNode{p.token.pos, p.token.line, vainString(p.token.val)}
 		return node, true
-
 	} else if p.accept(tokenSqOpen) {
-		node := &listNode{}
-		node.Pos = p.token.pos
-		node.value = make([]expr, 0, 16)
+		node := &listNode{p.token.pos, p.token.line, make([]expr, 0, 16)}
 		p.acceptSpaces()
 		if !p.accept(tokenSqClose) {
 			for {
@@ -1826,9 +1798,9 @@ func parseExpr9(p *parser) (expr, bool) {
 			}
 		}
 		return node, true
-
 	} else if p.accept(tokenCOpen) {
 		npos := p.token.pos
+		nline := p.token.line
 		var m [][]expr
 		p.acceptSpaces()
 		if !p.accept(tokenCClose) {
@@ -1840,7 +1812,7 @@ func parseExpr9(p *parser) (expr, bool) {
 				p.acceptSpaces()
 				t2 := p.next()
 				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
-					pair[0] = &identifierNode{t1.pos, t1.val}
+					pair[0] = &identifierNode{t1.pos, t1.line, t1.val}
 					p.acceptSpaces()
 					right, ok := parseExpr1(p)
 					if !ok {
@@ -1879,11 +1851,8 @@ func parseExpr9(p *parser) (expr, bool) {
 				}
 			}
 		}
-		node := &dictionaryNode{}
-		node.Pos = npos
-		node.value = m
+		node := &dictionaryNode{npos, nline, m}
 		return node, true
-
 	} else if p.accept(tokenPOpen) {
 		p.acceptSpaces()
 		node, ok := parseExpr1(p)
@@ -1896,43 +1865,26 @@ func parseExpr9(p *parser) (expr, bool) {
 			return nil, false
 		}
 		return node, true
-
 	} else if p.accept(tokenFunc) {
 		p.backup(p.token)
 		return acceptFunction(p, true)
-
 	} else if p.accept(tokenOption) {
-		node := &optionNode{}
-		node.Pos = p.token.pos
-		node.value = p.token.val
+		node := &optionNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
-
 	} else if p.accept(tokenIdentifier) {
-		node := &identifierNode{}
-		node.Pos = p.token.pos
-		node.value = p.token.val
+		node := &identifierNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
-
 	} else if p.canBeIdentifier(p.peek()) {
 		token := p.next()
-		node := &identifierNode{}
-		node.Pos = token.pos
-		node.value = token.val
+		node := &identifierNode{token.pos, token.line, token.val}
 		return node, true
-
 	} else if p.accept(tokenEnv) {
-		node := &envNode{}
-		node.Pos = p.token.pos
-		node.value = p.token.val
+		node := &envNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
-
 	} else if p.accept(tokenReg) {
-		node := &regNode{}
-		node.Pos = p.token.pos
-		node.value = p.token.val
+		node := &regNode{p.token.pos, p.token.line, p.token.val}
 		return node, true
 	}
-
 	p.errorf("")
 	return nil, false
 }

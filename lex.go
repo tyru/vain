@@ -16,25 +16,33 @@ type lexer struct {
 	input   string     // the string being scanned.
 	start   Pos        // start position of this item.
 	pos     Pos        // current position in the input.
-	width   int        // width of last rune read from input
-	prevPos Pos        // previous position to restore
+	width   int        // width of last rune read from input.
+	prevPos Pos        // previous position to restore.
 	tokens  chan token // channel of scanned items.
-	line    int        // 1+number of newlines seen
+	line    Line       // 1+number of newlines seen.
 }
 
 type token struct {
 	typ  tokenType // The type of this item.
 	pos  Pos       // The starting position, in bytes, of this item in the input string.
 	val  string    // The value of this item.
-	line int       // The line number of this item.
+	line Line      // The line number of this item.
 }
 
 // Pos is offset byte position from start of the file.
 type Pos int
 
-// Position returns pos itself
+// Position returns pos itself.
 func (p Pos) Position() Pos {
 	return p
+}
+
+// Line is 1+number of newlines seen.
+type Line int
+
+// LineNum returns line itself.
+func (l Line) LineNum() Line {
+	return l
 }
 
 type tokenType int
@@ -164,7 +172,8 @@ func (l *lexer) nextRunBy(pred func(rune) bool) string {
 // ignore skips over the pending input before this point.
 func (l *lexer) ignore() {
 	l.start = l.pos
-	l.line += strings.Count(l.input[l.start:l.pos], "\n")
+	n := strings.Count(l.input[l.start:l.pos], "\n")
+	l.line = Line(int(l.line) + n)
 }
 
 // ignoreRun skips over the pending input before this point.
