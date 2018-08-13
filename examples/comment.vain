@@ -1,0 +1,160 @@
+# one line comment
+# this is another comment node
+
+if 1 {
+  # statementOrExpression can be comment
+}
+
+func <
+  # autoload!
+  autoload
+> f() 42
+func <
+  autoload # autoload!
+> f() 42
+func <
+  autoload
+  # autoload!
+> f() 42
+
+func f(
+  # this is a
+  a: Int
+) 42
+func f(
+  a: Int # this is a
+) 42
+func f(
+  a: Int
+  # this is a
+) 42
+func f(
+  # this is a
+  a: Int,
+) 42
+func f(
+  a: Int, # this is a
+) 42
+func f(
+  a: Int,
+  # this is a
+) 42
+func f(
+  # a
+  a =
+  # default value
+  42
+) 42
+func f(
+  # this is a
+  a :
+  # Int!
+  Int,
+) 42
+
+1 ? # continue to next line
+  2 # next...
+  : # hey
+  3 # yo
+
+1 || # 2
+     3
+1 && # 2
+     3
+1 == # 2
+     3
+1 ==? # 2
+     3
+1 != # 2
+     3
+1 !=? # 2
+     3
+1 > # 2
+     3
+1 >? # 2
+     3
+1 >= # 2
+     3
+1 >=? # 2
+     3
+1 < # 2
+     3
+1 <? # 2
+     3
+1 <= # 2
+     3
+1 <=? # 2
+     3
+1 =~ # 2
+     3
+1 =~? # 2
+     3
+1 !~ # 2
+     3
+1 !~? # 2
+     3
+1 is # 2
+     3
+1 is? # 2
+     3
+1 isnot # 2
+     3
+1 isnot? # 2
+     3
+1 + # 2
+     3
+1 - # 2
+     3
+1 * # 2
+     3
+1 / # 2
+     3
+1 % # 2
+     3
+foo[
+  # baz
+  "bar"
+  # hoge
+]
+foo[
+  # begin
+  1
+  # colon
+  :
+  # end
+  2
+  # hoge
+]
+foo(
+  # a
+  1,
+  # b
+  2,
+  # c
+  3,
+  # hoge
+)
+foo.
+  bar
+[
+  # comment
+  1, # comment
+  # comment
+  2, # comment
+  # comment
+  3, # comment
+  # comment
+]
+{
+  # this is important pair
+  key : 'value',
+  # comment
+  k1 # comment
+  # comment
+  : # comment
+  # comment
+  42 # comment
+  # comment
+  ,  # comma
+  # comment
+]

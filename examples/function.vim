@@ -13,34 +13,34 @@ endfunction
 function! s:f6()
 " 3
 endfunction
-function! s:f7() abort
+function! s:f7(a) abort
 " 42
 endfunction
-function! s:f8() abort
+function! s:f8(a,b) abort
 " 42
 endfunction
-function! s:f9() abort
+function! s:f9(a,b) abort
 " 42
 endfunction
-function! s:f10() abort
+function! s:f10(a) abort
 " 42
 endfunction
-function! s:f11() abort
+function! s:f11(a) abort
 " 42
 endfunction
-function! s:f12() abort
+function! s:f12(a,b) abort
 " 42
 endfunction
-function! s:f13() abort
+function! s:f13(a,b) abort
 " 42
 endfunction
 " {->return 42}
 " {->1}
 " {->2}
 " 
-" {->42}
+" {a->42}
 " 
-" {->42}
+" {a->42}
 " 
 " function('s:expr1')
 " function('s:expr2')
@@ -59,9 +59,9 @@ endfunction
 " {->1}
 " {->2}
 " 
-" {->42}
+" {a->42}
 " 
-" {->42}
+" {a->42}
 " 
 function! s:func_with_type() abort
 endfunction

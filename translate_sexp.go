@@ -152,6 +152,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newLiteralNodeReader(n, level, "env")
 	case *regNode:
 		return t.newLiteralNodeReader(n, level, "reg")
+	case *commentNode:
+		return t.newLiteralNodeReader(n, level, "#")
 	default:
 		return t.err(fmt.Errorf("unknown node: %+v", node), node)
 	}

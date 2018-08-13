@@ -165,6 +165,8 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 		return t.newLiteralNodeReader(n, parent, level, "$")
 	case *regNode:
 		return t.newLiteralNodeReader(n, parent, level, "@")
+	case *commentNode:
+		return t.newCommentNodeReader(n, parent, level)
 	default:
 		return t.err(fmt.Errorf("unknown node: %+v", node), node)
 	}
@@ -562,6 +564,11 @@ func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent nod
 	return strings.NewReader(s)
 }
 
+func (t *vimTranslator) newCommentNodeReader(node *commentNode, parent node, level int) io.Reader {
+	// return strings.NewReader("\"" + node.value[1:])
+	return emptyReader
+}
+
 func (t *vimTranslator) toJSONString(vs *vainString) (string, error) {
 	s, err := vs.eval()
 	if err != nil {
@@ -680,6 +687,8 @@ func (t *vimTranslator) needsParen(node node) bool {
 	case *envNode:
 		return false
 	case *regNode:
+		return false
+	case *commentNode:
 		return false
 	}
 	return true

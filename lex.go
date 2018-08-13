@@ -113,6 +113,7 @@ const (
 	tokenFrom
 	tokenIf
 	tokenElse
+	tokenComment
 )
 
 func tokenName(typ tokenType) string {
@@ -638,6 +639,9 @@ func lexTop(l *lexer) lexStateFn {
 	case ':':
 		l.emit(tokenColon)
 		return lexTop
+	case '#':
+		l.backup()
+		return lexComment
 	default:
 		l.backup()
 	}
@@ -911,5 +915,13 @@ func lexReg(l *lexer) lexStateFn {
 			r == '/'
 	})
 	l.emit(tokenReg)
+	return lexTop
+}
+
+func lexComment(l *lexer) lexStateFn {
+	l.nextRunBy(func(r rune) bool {
+		return r != '\n'
+	})
+	l.emit(tokenComment)
 	return lexTop
 }
