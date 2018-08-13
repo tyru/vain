@@ -112,6 +112,136 @@ const (
 	tokenFrom
 )
 
+func tokenName(typ tokenType) string {
+	switch typ {
+	case tokenError:
+		return "tokenize error"
+	case tokenEOF:
+		return "EOF"
+	case tokenNewline:
+		return "newline"
+	case tokenIdentifier:
+		return "identifier"
+	case tokenComma:
+		return "\",\""
+	case tokenEqual:
+		return "\"=\""
+	case tokenEqEq:
+		return "\"==\""
+	case tokenEqEqCi:
+		return "\"==?\""
+	case tokenColon:
+		return "\":\""
+	case tokenQuestion:
+		return "\"?\""
+	case tokenStar:
+		return "\"*\""
+	case tokenSlash:
+		return "\"/\""
+	case tokenPercent:
+		return "\"%\""
+	case tokenSqOpen:
+		return "\"[\""
+	case tokenSqClose:
+		return "\"]\""
+	case tokenCOpen:
+		return "\"{\""
+	case tokenCClose:
+		return "\"}\""
+	case tokenPOpen:
+		return "\"(\""
+	case tokenPClose:
+		return "\")\""
+	case tokenInt:
+		return "Int"
+	case tokenFloat:
+		return "Float"
+	case tokenString:
+		return "String"
+	case tokenOption:
+		return "\"&\""
+	case tokenEnv:
+		return "\"$\""
+	case tokenReg:
+		return "\"@\""
+	case tokenBool:
+		return "Bool"
+	case tokenNone:
+		return "None"
+	case tokenNot:
+		return "\"!\""
+	case tokenNeq:
+		return "\"!=\""
+	case tokenNeqCi:
+		return "\"!=?\""
+	case tokenLt:
+		return "\"<\""
+	case tokenLtCi:
+		return "\"<?\""
+	case tokenLtEq:
+		return "\"<=\""
+	case tokenLtEqCi:
+		return "\"<=?\""
+	case tokenGt:
+		return "\">\""
+	case tokenGtCi:
+		return "\">?\""
+	case tokenGtEq:
+		return "\">=\""
+	case tokenGtEqCi:
+		return "\">=?\""
+	case tokenMatch:
+		return "\"=~\""
+	case tokenMatchCi:
+		return "\"=~?\""
+	case tokenNoMatch:
+		return "\"!~\""
+	case tokenNoMatchCi:
+		return "\"!~?\""
+	case tokenIs:
+		return "\"is\""
+	case tokenIsCi:
+		return "\"is?\""
+	case tokenIsNot:
+		return "\"isnot\""
+	case tokenIsNotCi:
+		return "\"isnot?\""
+	case tokenOr:
+		return "\"|\""
+	case tokenOrOr:
+		return "\"||\""
+	case tokenAnd:
+		return "\"&\""
+	case tokenAndAnd:
+		return "\"&&\""
+	case tokenPlus:
+		return "\"+\""
+	case tokenMinus:
+		return "\"-\""
+	case tokenArrow:
+		return "\"->\""
+	case tokenDot:
+		return "\".\""
+	case tokenDotDotDot:
+		return "\"...\""
+	case tokenConst:
+		return "\"const\""
+	case tokenLet:
+		return "\"let\""
+	case tokenFunc:
+		return "\"func\""
+	case tokenReturn:
+		return "\"return\""
+	case tokenImport:
+		return "\"import\""
+	case tokenAs:
+		return "\"as\""
+	case tokenFrom:
+		return "\"from\""
+	}
+	return ""
+}
+
 type lexStateFn func(*lexer) lexStateFn
 
 func lex(name, input string) *lexer {
