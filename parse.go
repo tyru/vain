@@ -37,7 +37,7 @@ type statement interface {
 }
 
 type errorNode struct {
-	Pos
+	*Pos
 	err error
 }
 
@@ -127,7 +127,7 @@ func (p *parser) acceptIdentifierLike() bool {
 }
 
 type topLevelNode struct {
-	Pos
+	*Pos
 	body []node
 }
 
@@ -136,7 +136,7 @@ func (node *topLevelNode) IsExpr() bool {
 }
 
 func parseTopLevel(p *parser) (*topLevelNode, bool) {
-	pos := Pos{0, 1, 0}
+	pos := &Pos{0, 1, 0}
 	toplevel := &topLevelNode{pos, make([]node, 0, 32)}
 	for {
 		node, ok := parseStmtOrExpr(p)
@@ -181,7 +181,7 @@ func parseStmtOrExpr(p *parser) (node, bool) {
 }
 
 type returnStatement struct {
-	Pos
+	*Pos
 	left expr
 }
 
@@ -194,7 +194,7 @@ func (node *returnStatement) Value() node {
 }
 
 type importStatement struct {
-	Pos
+	*Pos
 	pkg      vainString
 	pkgAlias string
 	fnlist   [][]string
@@ -285,7 +285,7 @@ func acceptImportFunctionList(p *parser) ([][]string, bool) {
 }
 
 type funcStmtOrExpr struct {
-	Pos
+	*Pos
 	isExpr     bool
 	mods       []string
 	name       string
@@ -502,7 +502,7 @@ func parseExpr(p *parser) (expr, bool) {
 }
 
 type ternaryNode struct {
-	Pos
+	*Pos
 	cond  expr
 	left  expr
 	right expr
@@ -546,7 +546,7 @@ type binaryOpNode interface {
 }
 
 type orNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -587,7 +587,7 @@ func parseExpr2(p *parser) (expr, bool) {
 }
 
 type andNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -628,7 +628,7 @@ func parseExpr3(p *parser) (expr, bool) {
 }
 
 type equalNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -646,7 +646,7 @@ func (node *equalNode) Right() node {
 }
 
 type equalCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -664,7 +664,7 @@ func (node *equalCiNode) Right() node {
 }
 
 type nequalNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -682,7 +682,7 @@ func (node *nequalNode) Right() node {
 }
 
 type nequalCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -700,7 +700,7 @@ func (node *nequalCiNode) Right() node {
 }
 
 type greaterNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -718,7 +718,7 @@ func (node *greaterNode) Right() node {
 }
 
 type greaterCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -736,7 +736,7 @@ func (node *greaterCiNode) Right() node {
 }
 
 type gequalNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -754,7 +754,7 @@ func (node *gequalNode) Right() node {
 }
 
 type gequalCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -772,7 +772,7 @@ func (node *gequalCiNode) Right() node {
 }
 
 type smallerNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -790,7 +790,7 @@ func (node *smallerNode) Right() node {
 }
 
 type smallerCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -808,7 +808,7 @@ func (node *smallerCiNode) Right() node {
 }
 
 type sequalNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -826,7 +826,7 @@ func (node *sequalNode) Right() node {
 }
 
 type sequalCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -844,7 +844,7 @@ func (node *sequalCiNode) Right() node {
 }
 
 type matchNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -862,7 +862,7 @@ func (node *matchNode) Right() node {
 }
 
 type matchCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -880,7 +880,7 @@ func (node *matchCiNode) Right() node {
 }
 
 type noMatchNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -898,7 +898,7 @@ func (node *noMatchNode) Right() node {
 }
 
 type noMatchCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -916,7 +916,7 @@ func (node *noMatchCiNode) Right() node {
 }
 
 type isNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -934,7 +934,7 @@ func (node *isNode) Right() node {
 }
 
 type isCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -952,7 +952,7 @@ func (node *isCiNode) Right() node {
 }
 
 type isNotNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -970,7 +970,7 @@ func (node *isNotNode) Right() node {
 }
 
 type isNotCiNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1198,7 +1198,7 @@ func parseExpr4(p *parser) (expr, bool) {
 }
 
 type addNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1216,7 +1216,7 @@ func (node *addNode) Right() node {
 }
 
 type subtractNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1268,7 +1268,7 @@ func parseExpr5(p *parser) (expr, bool) {
 }
 
 type multiplyNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1286,7 +1286,7 @@ func (node *multiplyNode) Right() node {
 }
 
 type divideNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1304,7 +1304,7 @@ func (node *divideNode) Right() node {
 }
 
 type remainderNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1370,7 +1370,7 @@ type unaryOpNode interface {
 }
 
 type notNode struct {
-	Pos
+	*Pos
 	left expr
 }
 
@@ -1383,7 +1383,7 @@ func (node *notNode) Value() node {
 }
 
 type minusNode struct {
-	Pos
+	*Pos
 	left expr
 }
 
@@ -1396,7 +1396,7 @@ func (node *minusNode) Value() node {
 }
 
 type plusNode struct {
-	Pos
+	*Pos
 	left expr
 }
 
@@ -1447,7 +1447,7 @@ func parseExpr7(p *parser) (expr, bool) {
 }
 
 type sliceNode struct {
-	Pos
+	*Pos
 	left  expr
 	rlist []expr
 }
@@ -1457,7 +1457,7 @@ func (node *sliceNode) IsExpr() bool {
 }
 
 type callNode struct {
-	Pos
+	*Pos
 	left  expr
 	rlist []expr
 }
@@ -1467,7 +1467,7 @@ func (node *callNode) IsExpr() bool {
 }
 
 type subscriptNode struct {
-	Pos
+	*Pos
 	left  expr
 	right expr
 }
@@ -1485,7 +1485,7 @@ func (node *subscriptNode) Right() node {
 }
 
 type dotNode struct {
-	Pos
+	*Pos
 	left  expr
 	right *identifierNode
 }
@@ -1503,7 +1503,7 @@ func (node *dotNode) Right() node {
 }
 
 type identifierNode struct {
-	Pos
+	*Pos
 	value string
 }
 
@@ -1619,7 +1619,7 @@ type literalNode interface {
 }
 
 type intNode struct {
-	Pos
+	*Pos
 	value string
 }
 
@@ -1628,7 +1628,7 @@ func (node *intNode) IsExpr() bool {
 }
 
 type floatNode struct {
-	Pos
+	*Pos
 	value string
 }
 
@@ -1637,7 +1637,7 @@ func (node *floatNode) IsExpr() bool {
 }
 
 type stringNode struct {
-	Pos
+	*Pos
 	value vainString
 }
 
@@ -1646,7 +1646,7 @@ func (node *stringNode) IsExpr() bool {
 }
 
 type listNode struct {
-	Pos
+	*Pos
 	value []expr
 }
 
@@ -1655,7 +1655,7 @@ func (node *listNode) IsExpr() bool {
 }
 
 type dictionaryNode struct {
-	Pos
+	*Pos
 	value [][]expr
 }
 
@@ -1664,7 +1664,7 @@ func (node *dictionaryNode) IsExpr() bool {
 }
 
 type optionNode struct {
-	Pos
+	*Pos
 	value string
 }
 
@@ -1677,7 +1677,7 @@ func (node *optionNode) Value() string {
 }
 
 type envNode struct {
-	Pos
+	*Pos
 	value string
 }
 
@@ -1690,7 +1690,7 @@ func (node *envNode) Value() string {
 }
 
 type regNode struct {
-	Pos
+	*Pos
 	value string
 }
 
