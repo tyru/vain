@@ -62,9 +62,8 @@ func (p *parser) emit(node node) {
 	p.start = -1
 }
 
-// emitErrorf is called when unexpected token was given.
-// This is normally lexer's bug.
-func (p *parser) emitErrorf(msg string, args ...interface{}) {
+// errorf returns an error token and terminates the scan
+func (p *parser) errorf(msg string, args ...interface{}) {
 	if p.token.typ == tokenEOF {
 		p.unexpectedEOF()
 		return
@@ -83,23 +82,23 @@ func (p *parser) emitErrorf(msg string, args ...interface{}) {
 		newargs = append(newargs, args...)
 		msg = fmt.Sprintf("%s:%d: "+msg, newargs...)
 	}
-	p.nodes <- &errorNode{err: errors.New(msg), Pos: p.token.pos}
+	p.emit(&errorNode{err: errors.New(msg), Pos: p.token.pos})
 }
 
 // unexpectedEOF is called when tokenEOF was given and it's unexpected.
 func (p *parser) unexpectedEOF() {
-	p.nodes <- &errorNode{
+	p.emit(&errorNode{
 		err: fmt.Errorf("%s:%d: unexpected EOF", p.name, p.token.line),
 		Pos: p.token.pos,
-	}
+	})
 }
 
 // tokenError is called when tokenError was given.
 func (p *parser) tokenError() {
-	p.nodes <- &errorNode{
+	p.emit(&errorNode{
 		err: fmt.Errorf("%s:%d: %s", p.name, p.token.line, p.token.val),
 		Pos: p.token.pos,
-	}
+	})
 }
 
 // next returns the next token in the input.
@@ -148,13 +147,6 @@ func (p *parser) acceptSpaces() bool {
 		return true
 	}
 	return false
-}
-
-// errorf returns an error token and terminates the scan
-// by passing back a nil pointer that will be the next
-// state, terminating l.Run.
-func (p *parser) errorf(format string, args ...interface{}) {
-	p.emit(&errorNode{err: fmt.Errorf(format, args...), Pos: p.token.pos})
 }
 
 type topLevelNode struct {
@@ -218,7 +210,7 @@ func (node *importStatement) IsExpr() bool {
 func acceptImportStatement(p *parser) (*importStatement, bool) {
 	if p.accept(tokenImport) {
 		if !p.accept(tokenString) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		pkg := vainString(p.token.val)
@@ -226,7 +218,7 @@ func acceptImportStatement(p *parser) (*importStatement, bool) {
 		if p.accept(tokenAs) {
 			p.acceptSpaces()
 			if !p.accept(tokenIdentifier) {
-				p.emitErrorf("")
+				p.errorf("")
 				return nil, false
 			}
 			pkgAlias = p.token.val
@@ -236,12 +228,12 @@ func acceptImportStatement(p *parser) (*importStatement, bool) {
 
 	} else if p.accept(tokenFrom) {
 		if !p.accept(tokenString) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		pkg := vainString(p.token.val)
 		if !p.accept(tokenImport) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		fnlist, ok := acceptImportFunctionList(p)
@@ -252,7 +244,7 @@ func acceptImportStatement(p *parser) (*importStatement, bool) {
 		return stmt, true
 	}
 
-	p.emitErrorf("")
+	p.errorf("")
 	return nil, false
 }
 
@@ -262,7 +254,7 @@ func acceptImportFunctionList(p *parser) ([][]string, bool) {
 	fnlist := make([][]string, 0, 1)
 	for {
 		if !p.accept(tokenIdentifier) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		orig := p.token.val
@@ -271,7 +263,7 @@ func acceptImportFunctionList(p *parser) ([][]string, bool) {
 		if p.accept(tokenAs) {
 			p.acceptSpaces()
 			if !p.accept(tokenIdentifier) {
-				p.emitErrorf("")
+				p.errorf("")
 				return nil, false
 			}
 			to = p.token.val
@@ -310,7 +302,7 @@ func (node *funcStmtOrExpr) IsExpr() bool {
 //        "func" [ functionModifierList ] [ identifier ] functionCallSignature "{" *LF *( statementOrExpression *LF ) "}" /
 func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 	if !p.accept(tokenFunc) {
-		p.emitErrorf("")
+		p.errorf("")
 		return nil, false
 	}
 
@@ -375,14 +367,14 @@ func acceptFunction(p *parser, isExpr bool) (*funcStmtOrExpr, bool) {
 // functionModifier := "noabort" | "autoload" | "global" | "range" | "dict" | "closure"
 func acceptModifiers(p *parser) ([]string, bool) {
 	if !p.accept(tokenLt) {
-		p.emitErrorf("")
+		p.errorf("")
 		return nil, false
 	}
 	mods := make([]string, 0, 8)
 	p.acceptSpaces()
 	for {
 		if !p.accept(tokenIdentifier) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		switch p.token.val {
@@ -393,7 +385,7 @@ func acceptModifiers(p *parser) ([]string, bool) {
 		case "dict":
 		case "closure":
 		default:
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		mods = append(mods, p.token.val)
@@ -413,7 +405,7 @@ func acceptModifiers(p *parser) ([]string, bool) {
 // functionCallSignature := "(" *LF *( functionArgument *LF "," *LF ) ")" [ ":" type ]
 func acceptFunctionCallSignature(p *parser) ([]argument, string, bool) {
 	if !p.accept(tokenPOpen) {
-		p.emitErrorf("")
+		p.errorf("")
 		return nil, "", false
 	}
 	p.acceptSpaces()
@@ -464,7 +456,7 @@ func acceptFunctionArgument(p *parser) (*argument, bool) {
 	var typ string
 
 	if !p.accept(tokenIdentifier) {
-		p.emitErrorf("")
+		p.errorf("")
 		return nil, false
 	}
 	name = p.token.val
@@ -487,7 +479,7 @@ func acceptFunctionArgument(p *parser) (*argument, bool) {
 		return &argument{name, "", expr}, true
 	}
 
-	p.emitErrorf("")
+	p.errorf("")
 	return nil, false
 }
 
@@ -495,7 +487,7 @@ func acceptFunctionArgument(p *parser) (*argument, bool) {
 // type := identifier
 func acceptType(p *parser) (string, bool) {
 	if !p.accept(tokenIdentifier) {
-		p.emitErrorf("")
+		p.errorf("")
 		return "", false
 	}
 	return p.token.val, true
@@ -532,7 +524,7 @@ func parseExpr1(p *parser) (expr, bool) {
 		node.left = expr
 		p.acceptSpaces()
 		if !p.accept(tokenColon) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		right, ok := parseExpr1(p)
@@ -1601,7 +1593,7 @@ func parseExpr8(p *parser) (expr, bool) {
 					node.rlist[1] = expr
 				}
 				if !p.accept(tokenSqClose) {
-					p.emitErrorf("")
+					p.errorf("")
 					return nil, false
 				}
 				left = node
@@ -1625,7 +1617,7 @@ func parseExpr8(p *parser) (expr, bool) {
 						node.rlist[1] = expr
 					}
 					if !p.accept(tokenSqClose) {
-						p.emitErrorf("")
+						p.errorf("")
 						return nil, false
 					}
 					left = node
@@ -1636,7 +1628,7 @@ func parseExpr8(p *parser) (expr, bool) {
 					node.right = right
 					p.acceptSpaces()
 					if !p.accept(tokenSqClose) {
-						p.emitErrorf("")
+						p.errorf("")
 						return nil, false
 					}
 					left = node
@@ -1664,7 +1656,7 @@ func parseExpr8(p *parser) (expr, bool) {
 					} else if p.accept(tokenPClose) {
 						break
 					} else {
-						p.emitErrorf("")
+						p.errorf("")
 						return nil, false
 					}
 				}
@@ -1674,7 +1666,7 @@ func parseExpr8(p *parser) (expr, bool) {
 			dot := p.token
 			p.acceptSpaces()
 			if !p.accept(tokenIdentifier) {
-				p.emitErrorf("")
+				p.errorf("")
 				return nil, false
 			}
 			node := &dotNode{}
@@ -1828,7 +1820,7 @@ func parseExpr9(p *parser) (expr, bool) {
 				} else if p.accept(tokenSqClose) {
 					break
 				} else {
-					p.emitErrorf("")
+					p.errorf("")
 					return nil, false
 				}
 			}
@@ -1864,7 +1856,7 @@ func parseExpr9(p *parser) (expr, bool) {
 					}
 					p.acceptSpaces()
 					if !p.accept(tokenColon) {
-						p.emitErrorf("")
+						p.errorf("")
 						return nil, false
 					}
 					p.acceptSpaces()
@@ -1900,7 +1892,7 @@ func parseExpr9(p *parser) (expr, bool) {
 		}
 		p.acceptSpaces()
 		if !p.accept(tokenPClose) {
-			p.emitErrorf("")
+			p.errorf("")
 			return nil, false
 		}
 		return node, true
@@ -1941,7 +1933,7 @@ func parseExpr9(p *parser) (expr, bool) {
 		return node, true
 	}
 
-	p.emitErrorf("")
+	p.errorf("")
 	return nil, false
 }
 
