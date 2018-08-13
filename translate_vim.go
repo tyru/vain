@@ -79,43 +79,43 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 	case *andNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "&&")
 	case *equalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "==")
+		return t.newBinaryOpNodeReader(n, parent, level, "==#")
 	case *equalCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "==?")
 	case *nequalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "!=")
+		return t.newBinaryOpNodeReader(n, parent, level, "!=#")
 	case *nequalCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "!=?")
 	case *greaterNode:
-		return t.newBinaryOpNodeReader(n, parent, level, ">")
+		return t.newBinaryOpNodeReader(n, parent, level, ">#")
 	case *greaterCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, ">?")
 	case *gequalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, ">=")
+		return t.newBinaryOpNodeReader(n, parent, level, ">=#")
 	case *gequalCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, ">=?")
 	case *smallerNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "<")
+		return t.newBinaryOpNodeReader(n, parent, level, "<#")
 	case *smallerCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "<?")
 	case *sequalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "<=")
+		return t.newBinaryOpNodeReader(n, parent, level, "<=#")
 	case *sequalCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "<=?")
 	case *matchNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "=~")
+		return t.newBinaryOpNodeReader(n, parent, level, "=~#")
 	case *matchCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "=~?")
 	case *noMatchNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "!~")
+		return t.newBinaryOpNodeReader(n, parent, level, "!~#")
 	case *noMatchCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "!~?")
 	case *isNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "is")
+		return t.newBinaryOpNodeReader(n, parent, level, "is#")
 	case *isCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "is?")
 	case *isNotNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "isnot")
+		return t.newBinaryOpNodeReader(n, parent, level, "isnot#")
 	case *isNotCiNode:
 		return t.newBinaryOpNodeReader(n, parent, level, "isnot?")
 	case *addNode:
