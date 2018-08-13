@@ -73,7 +73,7 @@ const (
 	tokenOption
 	tokenEnv
 	tokenReg
-	tokenBoolean
+	tokenBool
 	tokenNone
 	tokenNot
 	tokenNeq
@@ -528,7 +528,7 @@ func lexTop(l *lexer) lexStateFn {
 		l.emit(tokenFrom)
 		return lexTop
 	case "true", "false":
-		l.emit(tokenBoolean)
+		l.emit(tokenBool)
 		return lexTop
 	case "null", "none":
 		l.emit(tokenNone)
