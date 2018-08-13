@@ -59,7 +59,8 @@ const (
 	tokenCClose
 	tokenPOpen
 	tokenPClose
-	tokenNumber
+	tokenInt
+	tokenFloat
 	tokenString
 	tokenOption
 	tokenEnv
@@ -531,16 +532,31 @@ func lexTop(l *lexer) lexStateFn {
 }
 
 func lexNumber(l *lexer) lexStateFn {
-	if !acceptNumber(l) {
+	if acceptFloat(l) {
+		l.emit(tokenFloat)
+	} else if acceptInt(l) {
+		l.emit(tokenInt)
+	} else {
 		return l.errorf("expected number literal")
 	}
-	l.emit(tokenNumber)
 	return lexTop
 }
 
-// TODO Should we split Int/Float tokens?
-func acceptNumber(l *lexer) bool {
-	// Is it hex?
+func acceptInt(l *lexer) bool {
+	digits := "0123456789"
+	if l.accept("0") && l.accept("xX") {
+		digits = "0123456789abcdefABCDEF"
+	}
+	l.acceptRun(digits)
+	// Next thing mustn't be alphanumeric.
+	if isAlphaNumeric(l.next()) {
+		return false
+	}
+	l.backup()
+	return true
+}
+
+func acceptFloat(l *lexer) bool {
 	digits := "0123456789"
 	if l.accept("0") && l.accept("xX") {
 		digits = "0123456789abcdefABCDEF"

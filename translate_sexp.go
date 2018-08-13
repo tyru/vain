@@ -121,8 +121,10 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newBinaryOpNodeReader(n, level, "dot")
 	case *identifierNode:
 		return t.newIdentifierNodeReader(n, level)
-	case *numberNode:
-		return t.newNumberNodeReader(n, level)
+	case *intNode:
+		return t.newIntNodeReader(n, level)
+	case *floatNode:
+		return t.newFloatNodeReader(n, level)
 	case *stringNode:
 		return t.newStringNodeReader(n, level)
 	case *listNode:
@@ -329,7 +331,11 @@ func (t *sexpTranslator) newIdentifierNodeReader(node *identifierNode, level int
 	return strings.NewReader("'" + node.value)
 }
 
-func (t *sexpTranslator) newNumberNodeReader(node *numberNode, level int) io.Reader {
+func (t *sexpTranslator) newIntNodeReader(node *intNode, level int) io.Reader {
+	return strings.NewReader(node.value)
+}
+
+func (t *sexpTranslator) newFloatNodeReader(node *floatNode, level int) io.Reader {
 	return strings.NewReader(node.value)
 }
 

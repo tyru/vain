@@ -1693,12 +1693,21 @@ type literalNode interface {
 	Value() string
 }
 
-type numberNode struct {
+type intNode struct {
 	Pos
 	value string
 }
 
-func (node *numberNode) IsExpr() bool {
+func (node *intNode) IsExpr() bool {
+	return true
+}
+
+type floatNode struct {
+	Pos
+	value string
+}
+
+func (node *floatNode) IsExpr() bool {
 	return true
 }
 
@@ -1780,8 +1789,14 @@ func (node *regNode) Value() string {
 //        $VAR /
 //        @r
 func parseExpr9(p *parser) (expr, bool) {
-	if p.accept(tokenNumber) {
-		node := &numberNode{}
+	if p.accept(tokenInt) {
+		node := &intNode{}
+		node.Pos = p.token.pos
+		node.value = p.token.val
+		return node, true
+
+	} else if p.accept(tokenFloat) {
+		node := &floatNode{}
 		node.Pos = p.token.pos
 		node.value = p.token.val
 		return node, true

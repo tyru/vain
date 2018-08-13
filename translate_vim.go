@@ -134,8 +134,10 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 		return t.newDotNodeReader(n, parent, level)
 	case *identifierNode:
 		return t.newIdentifierNodeReader(n, parent, level)
-	case *numberNode:
-		return t.newNumberNodeReader(n, parent, level)
+	case *intNode:
+		return t.newIntNodeReader(n, parent, level)
+	case *floatNode:
+		return t.newFloatNodeReader(n, parent, level)
 	case *stringNode:
 		return t.newStringNodeReader(n, parent, level)
 	case *listNode:
@@ -428,7 +430,11 @@ func (t *vimTranslator) newIdentifierNodeReader(node *identifierNode, parent nod
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newNumberNodeReader(node *numberNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newIntNodeReader(node *intNode, parent node, level int) io.Reader {
+	return strings.NewReader(node.value)
+}
+
+func (t *vimTranslator) newFloatNodeReader(node *floatNode, parent node, level int) io.Reader {
 	return strings.NewReader(node.value)
 }
 
@@ -584,7 +590,9 @@ func (t *vimTranslator) needsParen(node node) bool {
 		return false
 	case *identifierNode:
 		return false
-	case *numberNode:
+	case *intNode:
+		return false
+	case *floatNode:
 		return false
 	case *stringNode:
 		return false
@@ -731,7 +739,8 @@ func (t *vimTranslator) walk(node node, f func(node) bool) {
 		t.walk(n.left, f)
 		t.walk(n.right, f)
 	case *identifierNode:
-	case *numberNode:
+	case *intNode:
+	case *floatNode:
 	case *stringNode:
 	case *listNode:
 		for i := range n.value {
