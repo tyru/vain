@@ -24,7 +24,7 @@ type parser struct {
 type nodeType int
 
 type node interface {
-	Position() Pos
+	Position() *Pos
 	IsExpr() bool
 }
 

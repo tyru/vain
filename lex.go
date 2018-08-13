@@ -37,7 +37,7 @@ type Pos struct {
 }
 
 // Position returns pos itself.
-func (p Pos) Position() Pos {
+func (p *Pos) Position() *Pos {
 	return p
 }
 
