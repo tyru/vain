@@ -304,7 +304,8 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *Pos, bool) {
 	var hasUnderscore bool
 	for {
 		if !p.accept(tokenIdentifier) && !p.accept(tokenUnderscore) {
-			p.errorf("expected %s or %s but got %s", tokenName(tokenIdentifier), tokenName(tokenUnderscore), tokenName(p.peek().typ))
+			p.errorf("expected %s or %s but got %s",
+				tokenName(tokenIdentifier), tokenName(tokenUnderscore), tokenName(p.peek().typ))
 			return nil, false, nil, false
 		}
 		if p.token.val == "_" {
@@ -376,7 +377,7 @@ func (node *ifStatement) IsExpr() bool {
 //                [ *blank "else" *blank ( ifStatement | block ) ]
 func (p *parser) acceptIfStatement() (node, bool) {
 	if !p.accept(tokenIf) {
-		p.errorf("expected if statement but got %s", tokenName(tokenIf), tokenName(p.peek().typ))
+		p.errorf("expected if statement but got %s", tokenName(p.peek().typ))
 		return nil, false
 	}
 	p.acceptBlanks()
@@ -434,7 +435,7 @@ func (node *whileStatement) IsExpr() bool {
 // whileStatement := "while" *blank expr *blank block
 func (p *parser) acceptWhileStatement() (node, bool) {
 	if !p.accept(tokenWhile) {
-		p.errorf("expected while statement but got %s", tokenName(tokenIf), tokenName(p.peek().typ))
+		p.errorf("expected while statement but got %s", tokenName(p.peek().typ))
 		return nil, false
 	}
 	p.acceptBlanks()
