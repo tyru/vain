@@ -5,34 +5,34 @@ endfunction
 function! s:f3()
 endfunction
 function! s:f4() abort
-" 1
+  " 1
 endfunction
 function! s:f5() abort
-" 2
+  " 2
 endfunction
 function! s:f6()
-" 3
+  " 3
 endfunction
 function! s:f7(a) abort
-" 42
+  " 42
 endfunction
 function! s:f8(a,b) abort
-" 42
+  " 42
 endfunction
 function! s:f9(a,b) abort
-" 42
+  " 42
 endfunction
 function! s:f10(a) abort
-" 42
+  " 42
 endfunction
 function! s:f11(a) abort
-" 42
+  " 42
 endfunction
 function! s:f12(a,b) abort
-" 42
+  " 42
 endfunction
 function! s:f13(a,b) abort
-" 42
+  " 42
 endfunction
 " {->return 42}
 " {->return 42}

@@ -8,25 +8,22 @@ import (
 	"strings"
 )
 
-// TODO indent
-// TODO newline
-// TODO customize indent, newline
-
 func translateVim(d *detector) translator {
-	return &vimTranslator{d.name, d.nodes, make(chan io.Reader), "  ", make([]io.Reader, 0, 16)}
+	return &vimTranslator{d.name, d.nodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
 }
 
 type vimTranslator struct {
 	name           string
 	nodes          <-chan node
 	readers        chan io.Reader
-	indent         string
+	indentStr      string
+	level          int
 	namedExprFuncs []io.Reader
 }
 
 func (t *vimTranslator) Run() {
 	for node := range t.nodes {
-		toplevel := t.toReader(node, node, 0)
+		toplevel := t.toReader(node, node)
 		if len(t.namedExprFuncs) > 0 {
 			t.emit(strings.NewReader("\" vain: begin named expression functions\n"))
 			for i := range t.namedExprFuncs {
@@ -58,155 +55,166 @@ func (t *vimTranslator) err(err error, node node) io.Reader {
 	}
 }
 
-func (t *vimTranslator) getIndent(level int) string {
-	return strings.Repeat(t.indent, level)
+func (t *vimTranslator) incIndent() {
+	t.level++
 }
 
-func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
+func (t *vimTranslator) decIndent() {
+	t.level--
+}
+
+func (t *vimTranslator) indent() string {
+	return strings.Repeat(t.indentStr, t.level)
+}
+
+func (t *vimTranslator) toReader(node, parent node) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
 	switch n := node.(type) {
 	case *errorNode:
 		return &errorReader{n.err}
 	case *topLevelNode:
-		return t.newTopLevelNodeReader(n, level)
+		return t.newTopLevelNodeReader(n)
 	case *importStatement:
-		return t.newImportStatementReader(n, parent, level)
+		return t.newImportStatementReader(n, parent)
 	case *funcStmtOrExpr:
-		return t.newFuncReader(n, parent, level)
+		return t.newFuncReader(n, parent)
 	case *returnStatement:
-		return t.newReturnNodeReader(n, parent, level)
+		return t.newReturnNodeReader(n, parent)
 	case *constStatement:
-		return t.newConstStatementReader(n, parent, level)
+		return t.newConstStatementReader(n, parent)
 	case *ifStatement:
-		return t.newIfStatementReader(n, parent, level, true)
+		return t.newIfStatementReader(n, parent, true)
 	case *ternaryNode:
-		return t.newTernaryNodeReader(n, parent, level)
+		return t.newTernaryNodeReader(n, parent)
 	case *orNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "||")
+		return t.newBinaryOpNodeReader(n, parent, "||")
 	case *andNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "&&")
+		return t.newBinaryOpNodeReader(n, parent, "&&")
 	case *equalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "==#")
+		return t.newBinaryOpNodeReader(n, parent, "==#")
 	case *equalCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "==?")
+		return t.newBinaryOpNodeReader(n, parent, "==?")
 	case *nequalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "!=#")
+		return t.newBinaryOpNodeReader(n, parent, "!=#")
 	case *nequalCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "!=?")
+		return t.newBinaryOpNodeReader(n, parent, "!=?")
 	case *greaterNode:
-		return t.newBinaryOpNodeReader(n, parent, level, ">#")
+		return t.newBinaryOpNodeReader(n, parent, ">#")
 	case *greaterCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, ">?")
+		return t.newBinaryOpNodeReader(n, parent, ">?")
 	case *gequalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, ">=#")
+		return t.newBinaryOpNodeReader(n, parent, ">=#")
 	case *gequalCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, ">=?")
+		return t.newBinaryOpNodeReader(n, parent, ">=?")
 	case *smallerNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "<#")
+		return t.newBinaryOpNodeReader(n, parent, "<#")
 	case *smallerCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "<?")
+		return t.newBinaryOpNodeReader(n, parent, "<?")
 	case *sequalNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "<=#")
+		return t.newBinaryOpNodeReader(n, parent, "<=#")
 	case *sequalCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "<=?")
+		return t.newBinaryOpNodeReader(n, parent, "<=?")
 	case *matchNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "=~#")
+		return t.newBinaryOpNodeReader(n, parent, "=~#")
 	case *matchCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "=~?")
+		return t.newBinaryOpNodeReader(n, parent, "=~?")
 	case *noMatchNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "!~#")
+		return t.newBinaryOpNodeReader(n, parent, "!~#")
 	case *noMatchCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "!~?")
+		return t.newBinaryOpNodeReader(n, parent, "!~?")
 	case *isNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "is#")
+		return t.newBinaryOpNodeReader(n, parent, "is#")
 	case *isCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "is?")
+		return t.newBinaryOpNodeReader(n, parent, "is?")
 	case *isNotNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "isnot#")
+		return t.newBinaryOpNodeReader(n, parent, "isnot#")
 	case *isNotCiNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "isnot?")
+		return t.newBinaryOpNodeReader(n, parent, "isnot?")
 	case *addNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "+")
+		return t.newBinaryOpNodeReader(n, parent, "+")
 	case *subtractNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "-")
+		return t.newBinaryOpNodeReader(n, parent, "-")
 	case *multiplyNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "*")
+		return t.newBinaryOpNodeReader(n, parent, "*")
 	case *divideNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "/")
+		return t.newBinaryOpNodeReader(n, parent, "/")
 	case *remainderNode:
-		return t.newBinaryOpNodeReader(n, parent, level, "%")
+		return t.newBinaryOpNodeReader(n, parent, "%")
 	case *notNode:
-		return t.newUnaryOpNodeReader(n, parent, level, "!")
+		return t.newUnaryOpNodeReader(n, parent, "!")
 	case *minusNode:
-		return t.newUnaryOpNodeReader(n, parent, level, "-")
+		return t.newUnaryOpNodeReader(n, parent, "-")
 	case *plusNode:
-		return t.newUnaryOpNodeReader(n, parent, level, "+")
+		return t.newUnaryOpNodeReader(n, parent, "+")
 	case *sliceNode:
-		return t.newSliceNodeReader(n, parent, level)
+		return t.newSliceNodeReader(n, parent)
 	case *callNode:
-		return t.newCallNodeReader(n, parent, level)
+		return t.newCallNodeReader(n, parent)
 	case *subscriptNode:
-		return t.newSubscriptNodeReader(n, parent, level)
+		return t.newSubscriptNodeReader(n, parent)
 	case *dotNode:
-		return t.newDotNodeReader(n, parent, level)
+		return t.newDotNodeReader(n, parent)
 	case *identifierNode:
-		return t.newIdentifierNodeReader(n, parent, level)
+		return t.newIdentifierNodeReader(n, parent)
 	case *intNode:
-		return t.newIntNodeReader(n, parent, level)
+		return t.newIntNodeReader(n, parent)
 	case *floatNode:
-		return t.newFloatNodeReader(n, parent, level)
+		return t.newFloatNodeReader(n, parent)
 	case *stringNode:
-		return t.newStringNodeReader(n, parent, level)
+		return t.newStringNodeReader(n, parent)
 	case *listNode:
-		return t.newListNodeReader(n, parent, level)
+		return t.newListNodeReader(n, parent)
 	case *dictionaryNode:
-		return t.newDictionaryNodeReader(n, parent, level)
+		return t.newDictionaryNodeReader(n, parent)
 	case *optionNode:
-		return t.newLiteralNodeReader(n, parent, level, "&")
+		return t.newLiteralNodeReader(n, parent, "&")
 	case *envNode:
-		return t.newLiteralNodeReader(n, parent, level, "$")
+		return t.newLiteralNodeReader(n, parent, "$")
 	case *regNode:
-		return t.newLiteralNodeReader(n, parent, level, "@")
+		return t.newLiteralNodeReader(n, parent, "@")
 	case *commentNode:
-		return t.newCommentNodeReader(n, parent, level)
+		return t.newCommentNodeReader(n, parent)
 	default:
 		return t.err(fmt.Errorf("unknown node: %+v", node), node)
 	}
 }
 
-func (t *vimTranslator) newTopLevelNodeReader(node *topLevelNode, level int) io.Reader {
-	rs := make([]io.Reader, 0, len(node.body))
+func (t *vimTranslator) newTopLevelNodeReader(node *topLevelNode) io.Reader {
+	var buf bytes.Buffer
 	for i := range node.body {
 		if i > 0 {
-			rs = append(rs, strings.NewReader("\n"))
+			buf.WriteString("\n")
 		}
-		r := t.toExcmd(node.body[i], node, level)
-		rs = append(rs, r)
+		buf.WriteString(t.indent())
+		_, err := io.Copy(&buf, t.toExcmd(node.body[i], node))
+		if err != nil {
+			return t.err(err, node)
+		}
 	}
-	return io.MultiReader(rs...)
+	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newImportStatementReader(stmt *importStatement, parent node, level int) io.Reader {
+func (t *vimTranslator) newImportStatementReader(stmt *importStatement, parent node) io.Reader {
 	// TODO
 	return strings.NewReader("")
 }
 
-func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node, level int) io.Reader {
+func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node) io.Reader {
 	if !f.IsExpr() {
 		// Function statement is required.
 		if f.name != "" {
-			return t.newFuncStmtReader(f, level)
+			return t.newFuncStmtReader(f)
 		}
 		// TODO Check len(f.body) == 1 here in analyzer.
 		if len(f.body) == 0 {
 			return emptyReader
 		}
-		return t.newLambdaReader(f, parent, level)
+		return t.newLambdaReader(f, parent)
 	}
 	// Function expression is required.
 	if f.name != "" {
 		if !t.isVoidExprFunc(f, parent) {
-			t.namedExprFuncs = append(t.namedExprFuncs, t.newFuncStmtReader(f, level))
+			t.namedExprFuncs = append(t.namedExprFuncs, t.newFuncStmtReader(f))
 		}
 		autoload, global, _ := t.convertModifiers(f.mods)
 		name := t.getFuncName(f, autoload, global)
@@ -216,7 +224,7 @@ func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node, level int)
 	if len(f.body) == 0 {
 		return emptyReader
 	}
-	return t.newLambdaReader(f, parent, level)
+	return t.newLambdaReader(f, parent)
 }
 
 func (t *vimTranslator) isVoidExprFunc(f *funcStmtOrExpr, parent node) bool {
@@ -247,7 +255,7 @@ func (t *vimTranslator) getFuncName(f *funcStmtOrExpr, autoload, global bool) st
 	return "s:" + f.name
 }
 
-func (t *vimTranslator) newFuncStmtReader(f *funcStmtOrExpr, level int) io.Reader {
+func (t *vimTranslator) newFuncStmtReader(f *funcStmtOrExpr) io.Reader {
 	autoload, global, vimmods := t.convertModifiers(f.mods)
 	name := t.getFuncName(f, autoload, global)
 	var buf bytes.Buffer
@@ -266,19 +274,22 @@ func (t *vimTranslator) newFuncStmtReader(f *funcStmtOrExpr, level int) io.Reade
 		buf.WriteString(strings.Join(vimmods, " "))
 	}
 	buf.WriteString("\n")
+	t.incIndent()
 	for i := range f.body {
-		r := t.toExcmd(f.body[i], f, level)
-		_, err := io.Copy(&buf, r)
+		buf.WriteString(t.indent())
+		_, err := io.Copy(&buf, t.toExcmd(f.body[i], f))
 		if err != nil {
 			return t.err(err, f.body[i])
 		}
 		buf.WriteString("\n")
 	}
+	t.decIndent()
+	buf.WriteString(t.indent())
 	buf.WriteString("endfunction")
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newLambdaReader(f *funcStmtOrExpr, parent node, level int) io.Reader {
+func (t *vimTranslator) newLambdaReader(f *funcStmtOrExpr, parent node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("{")
 	for i := range f.args {
@@ -288,7 +299,7 @@ func (t *vimTranslator) newLambdaReader(f *funcStmtOrExpr, parent node, level in
 		buf.WriteString(f.args[i].name)
 	}
 	buf.WriteString("->")
-	_, err := io.Copy(&buf, t.toReader(f.body[0], parent, level))
+	_, err := io.Copy(&buf, t.toReader(f.body[0], parent))
 	if err != nil {
 		return t.err(err, f.body[0])
 	}
@@ -319,16 +330,16 @@ func (t *vimTranslator) convertModifiers(mods []string) (autoload, global bool, 
 	return
 }
 
-func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, level int, top bool) io.Reader {
+func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, top bool) io.Reader {
 	var cond bytes.Buffer
-	_, err := io.Copy(&cond, t.toReader(node.cond, node, level))
+	_, err := io.Copy(&cond, t.toReader(node.cond, node))
 	if err != nil {
 		return t.err(err, node.cond)
 	}
 	var bodyList []string
 	for i := range node.body {
 		var buf bytes.Buffer
-		_, err = io.Copy(&buf, t.toReader(node.body[i], node, level))
+		_, err = io.Copy(&buf, t.toReader(node.body[i], node))
 		if err != nil {
 			return t.err(err, node.body[i])
 		}
@@ -338,41 +349,50 @@ func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, lev
 	buf.WriteString("if ")
 	buf.WriteString(t.paren(cond.String(), node.cond))
 	buf.WriteString("\n")
+	t.incIndent()
 	for i := range bodyList {
+		buf.WriteString(t.indent())
 		buf.WriteString(bodyList[i])
 		buf.WriteString("\n")
 	}
+	t.decIndent()
 	if len(node.els) > 0 {
 		if ifstmt, ok := node.els[0].(*ifStatement); ok { // else if
+			buf.WriteString(t.indent())
 			buf.WriteString("else")
-			r := t.newIfStatementReader(ifstmt, node, level+1, false)
+			r := t.newIfStatementReader(ifstmt, node, false)
 			_, err = io.Copy(&buf, r)
 			if err != nil {
 				return t.err(err, node.els[0])
 			}
 		} else { // else
+			buf.WriteString(t.indent())
 			buf.WriteString("else\n")
+			t.incIndent()
 			for i := range node.els {
-				_, err = io.Copy(&buf, t.toReader(node.els[i], node, level))
+				buf.WriteString(t.indent())
+				_, err = io.Copy(&buf, t.toReader(node.els[i], node))
 				if err != nil {
 					return t.err(err, node.els[i])
 				}
 				buf.WriteString("\n")
 			}
+			t.decIndent()
 		}
 	}
 	if top {
+		buf.WriteString(t.indent())
 		buf.WriteString("endif")
 	}
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, level int) io.Reader {
+func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node) io.Reader {
 	if node.left == nil {
 		return strings.NewReader("return")
 	}
 	var value bytes.Buffer
-	_, err := io.Copy(&value, t.toReader(node.left, parent, level))
+	_, err := io.Copy(&value, t.toReader(node.left, parent))
 	if err != nil {
 		return t.err(err, node.left)
 	}
@@ -380,7 +400,7 @@ func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, 
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newConstStatementReader(node *constStatement, parent node, level int) io.Reader {
+func (t *vimTranslator) newConstStatementReader(node *constStatement, parent node) io.Reader {
 	var left bytes.Buffer
 	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
 		left.WriteString("[")
@@ -388,20 +408,20 @@ func (t *vimTranslator) newConstStatementReader(node *constStatement, parent nod
 			if i > 0 {
 				left.WriteString(",")
 			}
-			_, err := io.Copy(&left, t.toReader(list.value[i], parent, level))
+			_, err := io.Copy(&left, t.toReader(list.value[i], parent))
 			if err != nil {
 				return t.err(err, list.value[i])
 			}
 		}
 		left.WriteString("]")
 	} else {
-		_, err := io.Copy(&left, t.toReader(node.left, parent, level))
+		_, err := io.Copy(&left, t.toReader(node.left, parent))
 		if err != nil {
 			return t.err(err, node.left)
 		}
 	}
 	var right bytes.Buffer
-	_, err := io.Copy(&right, t.toReader(node.right, parent, level))
+	_, err := io.Copy(&right, t.toReader(node.right, parent))
 	if err != nil {
 		return t.err(err, node.right)
 	}
@@ -409,19 +429,19 @@ func (t *vimTranslator) newConstStatementReader(node *constStatement, parent nod
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node) io.Reader {
 	var cond bytes.Buffer
-	_, err := io.Copy(&cond, t.toReader(node.cond, parent, level))
+	_, err := io.Copy(&cond, t.toReader(node.cond, parent))
 	if err != nil {
 		return t.err(err, node.cond)
 	}
 	var left bytes.Buffer
-	_, err = io.Copy(&left, t.toReader(node.left, parent, level))
+	_, err = io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
 		return t.err(err, node.left)
 	}
 	var right bytes.Buffer
-	_, err = io.Copy(&right, t.toReader(node.right, parent, level))
+	_, err = io.Copy(&right, t.toReader(node.right, parent))
 	if err != nil {
 		return t.err(err, node.right)
 	}
@@ -432,14 +452,14 @@ func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node, lev
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node, level int, opstr string) io.Reader {
+func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node, opstr string) io.Reader {
 	var left bytes.Buffer
-	_, err := io.Copy(&left, t.toReader(node.Left(), parent, level))
+	_, err := io.Copy(&left, t.toReader(node.Left(), parent))
 	if err != nil {
 		return t.err(err, node.Left())
 	}
 	var right bytes.Buffer
-	_, err = io.Copy(&right, t.toReader(node.Right(), parent, level))
+	_, err = io.Copy(&right, t.toReader(node.Right(), parent))
 	if err != nil {
 		return t.err(err, node.Right())
 	}
@@ -450,9 +470,9 @@ func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node, le
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node, level int, opstr string) io.Reader {
+func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node, opstr string) io.Reader {
 	var value bytes.Buffer
-	_, err := io.Copy(&value, t.toReader(node.Value(), parent, level))
+	_, err := io.Copy(&value, t.toReader(node.Value(), parent))
 	if err != nil {
 		return t.err(err, node.Value())
 	}
@@ -460,16 +480,16 @@ func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node, leve
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node) io.Reader {
 	var left bytes.Buffer
-	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
+	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
 		return t.err(err, node.left)
 	}
 	from := "null"
 	if node.rlist[0] != nil {
 		var buf bytes.Buffer
-		_, err := io.Copy(&buf, t.toReader(node.rlist[0], parent, level))
+		_, err := io.Copy(&buf, t.toReader(node.rlist[0], parent))
 		if err != nil {
 			return t.err(err, node.rlist[0])
 		}
@@ -478,7 +498,7 @@ func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node, level i
 	to := "null"
 	if node.rlist[1] != nil {
 		var buf bytes.Buffer
-		_, err := io.Copy(&buf, t.toReader(node.rlist[1], parent, level))
+		_, err := io.Copy(&buf, t.toReader(node.rlist[1], parent))
 		if err != nil {
 			return t.err(err, node.rlist[1])
 		}
@@ -491,16 +511,16 @@ func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node, level i
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newCallNodeReader(node *callNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newCallNodeReader(node *callNode, parent node) io.Reader {
 	var left bytes.Buffer
-	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
+	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
 		return t.err(err, node.left)
 	}
 	rlist := make([]string, 0, len(node.rlist))
 	for i := range node.rlist {
 		var arg bytes.Buffer
-		_, err := io.Copy(&arg, t.toReader(node.rlist[i], parent, level))
+		_, err := io.Copy(&arg, t.toReader(node.rlist[i], parent))
 		if err != nil {
 			return t.err(err, node.rlist[i])
 		}
@@ -510,14 +530,14 @@ func (t *vimTranslator) newCallNodeReader(node *callNode, parent node, level int
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node) io.Reader {
 	var left bytes.Buffer
-	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
+	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
 		return t.err(err, node.left)
 	}
 	var right bytes.Buffer
-	_, err = io.Copy(&right, t.toReader(node.right, parent, level))
+	_, err = io.Copy(&right, t.toReader(node.right, parent))
 	if err != nil {
 		return t.err(err, node.right)
 	}
@@ -525,14 +545,14 @@ func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node,
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node) io.Reader {
 	var left bytes.Buffer
-	_, err := io.Copy(&left, t.toReader(node.left, parent, level))
+	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
 		return t.err(err, node.left)
 	}
 	var right bytes.Buffer
-	_, err = io.Copy(&right, t.toReader(node.right, parent, level))
+	_, err = io.Copy(&right, t.toReader(node.right, parent))
 	if err != nil {
 		return t.err(err, node.right)
 	}
@@ -542,31 +562,31 @@ func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node, level int) 
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newIdentifierNodeReader(node *identifierNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newIdentifierNodeReader(node *identifierNode, parent node) io.Reader {
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newIntNodeReader(node *intNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newIntNodeReader(node *intNode, parent node) io.Reader {
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newFloatNodeReader(node *floatNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newFloatNodeReader(node *floatNode, parent node) io.Reader {
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newStringNodeReader(node *stringNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newStringNodeReader(node *stringNode, parent node) io.Reader {
 	return strings.NewReader(string(node.value))
 }
 
-func (t *vimTranslator) newLiteralNodeReader(node literalNode, parent node, level int, opstr string) io.Reader {
+func (t *vimTranslator) newLiteralNodeReader(node literalNode, parent node, opstr string) io.Reader {
 	return strings.NewReader(opstr + node.Value())
 }
 
-func (t *vimTranslator) newListNodeReader(node *listNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newListNodeReader(node *listNode, parent node) io.Reader {
 	args := make([]string, 0, len(node.value))
 	for i := range node.value {
 		var arg bytes.Buffer
-		_, err := io.Copy(&arg, t.toReader(node.value[i], parent, level))
+		_, err := io.Copy(&arg, t.toReader(node.value[i], parent))
 		if err != nil {
 			return t.err(err, node.value[i])
 		}
@@ -576,7 +596,7 @@ func (t *vimTranslator) newListNodeReader(node *listNode, parent node, level int
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent node) io.Reader {
 	args := make([]string, 0, len(node.value))
 	for i := range node.value {
 		var key bytes.Buffer
@@ -588,14 +608,14 @@ func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent nod
 			}
 			key.WriteString(string(*s))
 		} else {
-			_, err := io.Copy(&key, t.toReader(keyNode, parent, level))
+			_, err := io.Copy(&key, t.toReader(keyNode, parent))
 			if err != nil {
 				return t.err(err, keyNode)
 			}
 		}
 		var val bytes.Buffer
 		valNode := node.value[i][1]
-		_, err := io.Copy(&val, t.toReader(valNode, parent, level))
+		_, err := io.Copy(&val, t.toReader(valNode, parent))
 		if err != nil {
 			return t.err(err, valNode)
 		}
@@ -605,7 +625,7 @@ func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent nod
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newCommentNodeReader(node *commentNode, parent node, level int) io.Reader {
+func (t *vimTranslator) newCommentNodeReader(node *commentNode, parent node) io.Reader {
 	// return strings.NewReader("\"" + node.value[1:])
 	return emptyReader
 }
@@ -735,7 +755,7 @@ func (t *vimTranslator) needsParen(node node) bool {
 	return true
 }
 
-func (t *vimTranslator) toExcmd(n, parent node, level int) io.Reader {
+func (t *vimTranslator) toExcmd(n, parent node) io.Reader {
 	rs := make([]io.Reader, 0, 2)
 	_, isCall := n.(*callNode)
 	if !isCall && t.isVoidExpr(n, parent) {
@@ -745,11 +765,7 @@ func (t *vimTranslator) toExcmd(n, parent node, level int) io.Reader {
 	} else if isCall {
 		rs = append(rs, strings.NewReader("call "))
 	}
-	// topLevelNode doesn't increment level
-	if _, ok := parent.(*topLevelNode); !ok {
-		level++
-	}
-	rs = append(rs, t.toReader(n, parent, level))
+	rs = append(rs, t.toReader(n, parent))
 	return io.MultiReader(rs...)
 }
 

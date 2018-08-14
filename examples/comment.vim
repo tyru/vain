@@ -3,37 +3,37 @@
 if 1
 endif
 function! s:f() abort
-" 42
+  " 42
 endfunction
 function! s:f() abort
-" 42
+  " 42
 endfunction
 function! s:f() abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 function! s:f(a) abort
-" 42
+  " 42
 endfunction
 " 1 ? 2 : 3
 
