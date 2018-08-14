@@ -79,6 +79,22 @@ func build(args []string) error {
 	// 1. Collect .vain files -> files
 	var err error
 	go func() {
+		if len(args) > 0 {
+			// If arguments were given, pass them as filenames.
+			for i := range args {
+				if _, e := os.Stat(args[i]); os.IsNotExist(e) {
+					err = e
+					close(files)
+					return
+				}
+			}
+			for i := range args {
+				files <- args[i]
+			}
+			close(files)
+			return
+		}
+		// Otherwise, collect .vain files under current directory.
 		err = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err

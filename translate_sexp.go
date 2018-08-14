@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// TODO indent
+// TODO newline
+// TODO customize indent, newline
+
 func translateSexp(d *detector) translator {
 	return &sexpTranslator{d.name, d.nodes, make(chan io.Reader), "  "}
 }
@@ -47,7 +51,7 @@ func (t *sexpTranslator) getIndent(level int) string {
 
 func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
-	switch n := node.(type) {
+	switch n := node.Node().(type) {
 	case *errorNode:
 		return &errorReader{n.err}
 	case *topLevelNode:
@@ -182,7 +186,7 @@ func (t *sexpTranslator) newImportStatementReader(stmt *importStatement, level i
 	}
 	args = append(args, "("+strings.Join(pkgPair, " ")+")")
 
-	if stmt.fnlist != nil {
+	if len(stmt.fnlist) > 0 {
 		fnPairList := make([]string, 0, len(stmt.fnlist))
 		for i := range stmt.fnlist {
 			fnPairList = append(fnPairList, "("+strings.Join(stmt.fnlist[i], " ")+")")
@@ -260,23 +264,23 @@ func (t *sexpTranslator) newReturnNodeReader(node *returnStatement, level int) i
 
 func (t *sexpTranslator) newConstStatementReader(node *constStatement, level int) io.Reader {
 	var left bytes.Buffer
-	if len(node.left) == 1 {
-		_, err := io.Copy(&left, t.toReader(&node.left[0], level))
-		if err != nil {
-			return t.err(err, &node.left[0])
-		}
-	} else {
+	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
 		left.WriteString("(")
-		for i := range node.left {
+		for i := range list.value {
 			if i > 0 {
 				left.WriteString(" ")
 			}
-			_, err := io.Copy(&left, t.toReader(&node.left[i], level))
+			_, err := io.Copy(&left, t.toReader(list.value[i], level))
 			if err != nil {
-				return t.err(err, &node.left[i])
+				return t.err(err, list.value[i])
 			}
 		}
 		left.WriteString(")")
+	} else {
+		_, err := io.Copy(&left, t.toReader(node.left, level))
+		if err != nil {
+			return t.err(err, node.left)
+		}
 	}
 	var right bytes.Buffer
 	_, err := io.Copy(&right, t.toReader(node.right, level))
@@ -303,7 +307,7 @@ func (t *sexpTranslator) newIfStatementReader(node *ifStatement, level int) io.R
 		bodyList = append(bodyList, buf.String())
 	}
 	var s string
-	if node.els == nil {
+	if len(node.els) == 0 {
 		s = fmt.Sprintf("(if %s (%s))",
 			cond.String(), strings.Join(bodyList, " "))
 	} else {

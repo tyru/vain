@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// TODO indent
+// TODO newline
+// TODO customize indent, newline
+
 func translateVim(d *detector) translator {
 	return &vimTranslator{d.name, d.nodes, make(chan io.Reader), "  ", make([]io.Reader, 0, 16)}
 }
@@ -378,23 +382,23 @@ func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, 
 
 func (t *vimTranslator) newConstStatementReader(node *constStatement, parent node, level int) io.Reader {
 	var left bytes.Buffer
-	if len(node.left) == 1 {
-		_, err := io.Copy(&left, t.toReader(&node.left[0], parent, level))
-		if err != nil {
-			return t.err(err, &node.left[0])
-		}
-	} else {
+	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
 		left.WriteString("[")
-		for i := range node.left {
+		for i := range list.value {
 			if i > 0 {
 				left.WriteString(",")
 			}
-			_, err := io.Copy(&left, t.toReader(&node.left[i], parent, level))
+			_, err := io.Copy(&left, t.toReader(list.value[i], parent, level))
 			if err != nil {
-				return t.err(err, &node.left[i])
+				return t.err(err, list.value[i])
 			}
 		}
 		left.WriteString("]")
+	} else {
+		_, err := io.Copy(&left, t.toReader(node.left, parent, level))
+		if err != nil {
+			return t.err(err, node.left)
+		}
 	}
 	var right bytes.Buffer
 	_, err := io.Copy(&right, t.toReader(node.right, parent, level))
@@ -527,7 +531,14 @@ func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node, level int) 
 	if err != nil {
 		return t.err(err, node.left)
 	}
-	s := fmt.Sprintf("%s.%s", t.paren(left.String(), node.left), node.right.value)
+	var right bytes.Buffer
+	_, err = io.Copy(&right, t.toReader(node.right, parent, level))
+	if err != nil {
+		return t.err(err, node.right)
+	}
+	s := fmt.Sprintf("%s.%s",
+		t.paren(left.String(), node.left),
+		t.paren(right.String(), node.right))
 	return strings.NewReader(s)
 }
 

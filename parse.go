@@ -22,6 +22,7 @@ type parser struct {
 }
 
 type node interface {
+	Node() node
 	Position() *Pos
 	IsExpr() bool
 }
@@ -34,9 +35,17 @@ type statement interface {
 	node
 }
 
+// errorNode holds an error and node position.
+// errorNode is used also instead of error type.
+// Because it's a bother to use both 'node' and 'error' variables
+// for representing parse error of a node.
 type errorNode struct {
 	*Pos
 	err error
+}
+
+func (node *errorNode) Node() node {
+	return node
 }
 
 func (node *errorNode) IsExpr() bool {
@@ -146,6 +155,10 @@ type topLevelNode struct {
 	body []node
 }
 
+func (node *topLevelNode) Node() node {
+	return node
+}
+
 func (node *topLevelNode) IsExpr() bool {
 	return false
 }
@@ -165,6 +178,10 @@ func (p *parser) acceptTopLevel() (*topLevelNode, bool) {
 type commentNode struct {
 	*Pos
 	value string
+}
+
+func (node *commentNode) Node() node {
+	return node
 }
 
 func (node *commentNode) IsExpr() bool {
@@ -220,9 +237,13 @@ func (p *parser) acceptStmtOrExpr() (node, bool) {
 
 type constStatement struct {
 	*Pos
-	left          []identifierNode
+	left          node
 	right         expr
 	hasUnderscore bool
+}
+
+func (node *constStatement) Node() node {
+	return node
 }
 
 func (node *constStatement) IsExpr() bool {
@@ -236,13 +257,12 @@ func (p *parser) acceptConstStatement() (node, bool) {
 		return nil, false
 	}
 	pos := p.token.pos
-	var left []identifierNode
+	var left node
 	var hasUnderscore bool
 	if p.accept(tokenIdentifier) {
-		id := identifierNode{p.token.pos, p.token.val}
-		left = append(left, id)
-	} else if ids, underscore, ok := p.acceptDestructuringAssignment(); ok {
-		left = ids
+		left = &identifierNode{p.token.pos, p.token.val}
+	} else if ids, underscore, listpos, ok := p.acceptDestructuringAssignment(); ok {
+		left = &listNode{listpos, ids}
 		hasUnderscore = underscore
 	} else {
 		p.errorf("expected %s or destructuring assignment but got %s", tokenName(tokenIdentifier), tokenName(p.peek().typ))
@@ -265,27 +285,28 @@ func (p *parser) acceptConstStatement() (node, bool) {
 //                            identifierOrUnderscore *blank [ "," ]
 //                          *blank "]"
 // identifierOrUnderscore := identifier | "_"
-func (p *parser) acceptDestructuringAssignment() ([]identifierNode, bool, bool) {
+func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *Pos, bool) {
 	if !p.accept(tokenSqOpen) {
 		p.errorf("expected %s but got %s", tokenName(tokenLt), tokenName(p.peek().typ))
-		return nil, false, false
+		return nil, false, nil, false
 	}
+	pos := p.token.pos
 	p.acceptBlanks()
 	if p.accept(tokenSqClose) {
 		p.errorf("at least 1 identifier is needed")
-		return nil, false, false
+		return nil, false, nil, false
 	}
-	ids := make([]identifierNode, 0, 8)
+	ids := make([]expr, 0, 8)
 	var hasUnderscore bool
 	for {
 		if !p.accept(tokenIdentifier) && !p.accept(tokenUnderscore) {
 			p.errorf("expected %s or %s but got %s", tokenName(tokenIdentifier), tokenName(tokenUnderscore), tokenName(p.peek().typ))
-			return nil, false, false
+			return nil, false, nil, false
 		}
 		if p.token.val == "_" {
 			hasUnderscore = true
 		}
-		ids = append(ids, identifierNode{p.token.pos, p.token.val})
+		ids = append(ids, &identifierNode{p.token.pos, p.token.val})
 		p.acceptBlanks()
 		p.accept(tokenComma)
 		p.acceptBlanks()
@@ -293,7 +314,7 @@ func (p *parser) acceptDestructuringAssignment() ([]identifierNode, bool, bool) 
 			break
 		}
 	}
-	return ids, hasUnderscore, true
+	return ids, hasUnderscore, pos, true
 }
 
 type returnStatement struct {
@@ -301,11 +322,17 @@ type returnStatement struct {
 	left expr
 }
 
+func (node *returnStatement) Node() node {
+	return node
+}
+
 func (node *returnStatement) IsExpr() bool {
 	return false
 }
 
-// returnStatement := "return" ( expr | LF | "}")
+// returnStatement := "return" ( expr | LF )
+// and if tokenCClose is detected instead of expr,
+// it must be empty return statement inside block.
 func (p *parser) acceptReturnStatement() (node, bool) {
 	if !p.accept(tokenReturn) {
 		p.errorf("expected %s but got %s", tokenName(tokenReturn), tokenName(p.peek().typ))
@@ -331,6 +358,10 @@ type ifStatement struct {
 	cond expr
 	body []node
 	els  []node
+}
+
+func (node *ifStatement) Node() node {
+	return node
 }
 
 func (node *ifStatement) IsExpr() bool {
@@ -411,6 +442,10 @@ type importStatement struct {
 	pkg      vainString
 	pkgAlias string
 	fnlist   [][]string
+}
+
+func (node *importStatement) Node() node {
+	return node
 }
 
 func (node *importStatement) IsExpr() bool {
@@ -506,6 +541,10 @@ type funcStmtOrExpr struct {
 	retType    string
 	bodyIsStmt bool
 	body       []node
+}
+
+func (node *funcStmtOrExpr) Node() node {
+	return node
 }
 
 func (node *funcStmtOrExpr) IsExpr() bool {
@@ -721,6 +760,10 @@ type ternaryNode struct {
 	right expr
 }
 
+func (node *ternaryNode) Node() node {
+	return node
+}
+
 func (node *ternaryNode) IsExpr() bool {
 	return true
 }
@@ -761,6 +804,10 @@ type orNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *orNode) Node() node {
+	return node
 }
 
 func (node *orNode) IsExpr() bool {
@@ -804,6 +851,10 @@ type andNode struct {
 	right expr
 }
 
+func (node *andNode) Node() node {
+	return node
+}
+
 func (node *andNode) IsExpr() bool {
 	return true
 }
@@ -845,6 +896,10 @@ type equalNode struct {
 	right expr
 }
 
+func (node *equalNode) Node() node {
+	return node
+}
+
 func (node *equalNode) IsExpr() bool {
 	return true
 }
@@ -861,6 +916,10 @@ type equalCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *equalCiNode) Node() node {
+	return node
 }
 
 func (node *equalCiNode) IsExpr() bool {
@@ -881,6 +940,10 @@ type nequalNode struct {
 	right expr
 }
 
+func (node *nequalNode) Node() node {
+	return node
+}
+
 func (node *nequalNode) IsExpr() bool {
 	return true
 }
@@ -897,6 +960,10 @@ type nequalCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *nequalCiNode) Node() node {
+	return node
 }
 
 func (node *nequalCiNode) IsExpr() bool {
@@ -917,6 +984,10 @@ type greaterNode struct {
 	right expr
 }
 
+func (node *greaterNode) Node() node {
+	return node
+}
+
 func (node *greaterNode) IsExpr() bool {
 	return true
 }
@@ -933,6 +1004,10 @@ type greaterCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *greaterCiNode) Node() node {
+	return node
 }
 
 func (node *greaterCiNode) IsExpr() bool {
@@ -953,6 +1028,10 @@ type gequalNode struct {
 	right expr
 }
 
+func (node *gequalNode) Node() node {
+	return node
+}
+
 func (node *gequalNode) IsExpr() bool {
 	return true
 }
@@ -969,6 +1048,10 @@ type gequalCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *gequalCiNode) Node() node {
+	return node
 }
 
 func (node *gequalCiNode) IsExpr() bool {
@@ -989,6 +1072,10 @@ type smallerNode struct {
 	right expr
 }
 
+func (node *smallerNode) Node() node {
+	return node
+}
+
 func (node *smallerNode) IsExpr() bool {
 	return true
 }
@@ -1005,6 +1092,10 @@ type smallerCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *smallerCiNode) Node() node {
+	return node
 }
 
 func (node *smallerCiNode) IsExpr() bool {
@@ -1025,6 +1116,10 @@ type sequalNode struct {
 	right expr
 }
 
+func (node *sequalNode) Node() node {
+	return node
+}
+
 func (node *sequalNode) IsExpr() bool {
 	return true
 }
@@ -1041,6 +1136,10 @@ type sequalCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *sequalCiNode) Node() node {
+	return node
 }
 
 func (node *sequalCiNode) IsExpr() bool {
@@ -1061,6 +1160,10 @@ type matchNode struct {
 	right expr
 }
 
+func (node *matchNode) Node() node {
+	return node
+}
+
 func (node *matchNode) IsExpr() bool {
 	return true
 }
@@ -1077,6 +1180,10 @@ type matchCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *matchCiNode) Node() node {
+	return node
 }
 
 func (node *matchCiNode) IsExpr() bool {
@@ -1097,6 +1204,10 @@ type noMatchNode struct {
 	right expr
 }
 
+func (node *noMatchNode) Node() node {
+	return node
+}
+
 func (node *noMatchNode) IsExpr() bool {
 	return true
 }
@@ -1113,6 +1224,10 @@ type noMatchCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *noMatchCiNode) Node() node {
+	return node
 }
 
 func (node *noMatchCiNode) IsExpr() bool {
@@ -1133,6 +1248,10 @@ type isNode struct {
 	right expr
 }
 
+func (node *isNode) Node() node {
+	return node
+}
+
 func (node *isNode) IsExpr() bool {
 	return true
 }
@@ -1149,6 +1268,10 @@ type isCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *isCiNode) Node() node {
+	return node
 }
 
 func (node *isCiNode) IsExpr() bool {
@@ -1169,6 +1292,10 @@ type isNotNode struct {
 	right expr
 }
 
+func (node *isNotNode) Node() node {
+	return node
+}
+
 func (node *isNotNode) IsExpr() bool {
 	return true
 }
@@ -1185,6 +1312,10 @@ type isNotCiNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *isNotCiNode) Node() node {
+	return node
 }
 
 func (node *isNotCiNode) IsExpr() bool {
@@ -1415,6 +1546,10 @@ type addNode struct {
 	right expr
 }
 
+func (node *addNode) Node() node {
+	return node
+}
+
 func (node *addNode) IsExpr() bool {
 	return true
 }
@@ -1431,6 +1566,10 @@ type subtractNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *subtractNode) Node() node {
+	return node
 }
 
 func (node *subtractNode) IsExpr() bool {
@@ -1485,6 +1624,10 @@ type multiplyNode struct {
 	right expr
 }
 
+func (node *multiplyNode) Node() node {
+	return node
+}
+
 func (node *multiplyNode) IsExpr() bool {
 	return true
 }
@@ -1503,6 +1646,10 @@ type divideNode struct {
 	right expr
 }
 
+func (node *divideNode) Node() node {
+	return node
+}
+
 func (node *divideNode) IsExpr() bool {
 	return true
 }
@@ -1519,6 +1666,10 @@ type remainderNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *remainderNode) Node() node {
+	return node
 }
 
 func (node *remainderNode) IsExpr() bool {
@@ -1586,6 +1737,10 @@ type notNode struct {
 	left expr
 }
 
+func (node *notNode) Node() node {
+	return node
+}
+
 func (node *notNode) IsExpr() bool {
 	return true
 }
@@ -1599,6 +1754,10 @@ type minusNode struct {
 	left expr
 }
 
+func (node *minusNode) Node() node {
+	return node
+}
+
 func (node *minusNode) IsExpr() bool {
 	return true
 }
@@ -1610,6 +1769,10 @@ func (node *minusNode) Value() node {
 type plusNode struct {
 	*Pos
 	left expr
+}
+
+func (node *plusNode) Node() node {
+	return node
 }
 
 func (node *plusNode) IsExpr() bool {
@@ -1661,6 +1824,10 @@ type sliceNode struct {
 	rlist []expr
 }
 
+func (node *sliceNode) Node() node {
+	return node
+}
+
 func (node *sliceNode) IsExpr() bool {
 	return true
 }
@@ -1671,6 +1838,10 @@ type callNode struct {
 	rlist []expr
 }
 
+func (node *callNode) Node() node {
+	return node
+}
+
 func (node *callNode) IsExpr() bool {
 	return true
 }
@@ -1679,6 +1850,10 @@ type subscriptNode struct {
 	*Pos
 	left  expr
 	right expr
+}
+
+func (node *subscriptNode) Node() node {
+	return node
 }
 
 func (node *subscriptNode) IsExpr() bool {
@@ -1696,7 +1871,11 @@ func (node *subscriptNode) Right() node {
 type dotNode struct {
 	*Pos
 	left  expr
-	right *identifierNode
+	right node
+}
+
+func (node *dotNode) Node() node {
+	return node
 }
 
 func (node *dotNode) IsExpr() bool {
@@ -1714,6 +1893,10 @@ func (node *dotNode) Right() node {
 type identifierNode struct {
 	*Pos
 	value string
+}
+
+func (node *identifierNode) Node() node {
+	return node
 }
 
 func (node *identifierNode) IsExpr() bool {
@@ -1834,6 +2017,10 @@ type intNode struct {
 	value string
 }
 
+func (node *intNode) Node() node {
+	return node
+}
+
 func (node *intNode) IsExpr() bool {
 	return true
 }
@@ -1841,6 +2028,10 @@ func (node *intNode) IsExpr() bool {
 type floatNode struct {
 	*Pos
 	value string
+}
+
+func (node *floatNode) Node() node {
+	return node
 }
 
 func (node *floatNode) IsExpr() bool {
@@ -1852,6 +2043,10 @@ type stringNode struct {
 	value vainString
 }
 
+func (node *stringNode) Node() node {
+	return node
+}
+
 func (node *stringNode) IsExpr() bool {
 	return true
 }
@@ -1859,6 +2054,10 @@ func (node *stringNode) IsExpr() bool {
 type listNode struct {
 	*Pos
 	value []expr
+}
+
+func (node *listNode) Node() node {
+	return node
 }
 
 func (node *listNode) IsExpr() bool {
@@ -1870,6 +2069,10 @@ type dictionaryNode struct {
 	value [][]expr
 }
 
+func (node *dictionaryNode) Node() node {
+	return node
+}
+
 func (node *dictionaryNode) IsExpr() bool {
 	return true
 }
@@ -1877,6 +2080,10 @@ func (node *dictionaryNode) IsExpr() bool {
 type optionNode struct {
 	*Pos
 	value string
+}
+
+func (node *optionNode) Node() node {
+	return node
 }
 
 func (node *optionNode) IsExpr() bool {
@@ -1892,6 +2099,10 @@ type envNode struct {
 	value string
 }
 
+func (node *envNode) Node() node {
+	return node
+}
+
 func (node *envNode) IsExpr() bool {
 	return true
 }
@@ -1903,6 +2114,10 @@ func (node *envNode) Value() string {
 type regNode struct {
 	*Pos
 	value string
+}
+
+func (node *regNode) Node() node {
+	return node
 }
 
 func (node *regNode) IsExpr() bool {

@@ -711,49 +711,28 @@ func lexTop(l *lexer) lexStateFn {
 }
 
 func lexNumber(l *lexer) lexStateFn {
-	if acceptFloat(l) {
-		l.emit(tokenFloat)
-	} else if acceptInt(l) {
+	digits := "0123456789"
+	if l.accept("0") && l.accept("xX") {
+		digits = "0123456789abcdefABCDEF"
+	}
+	l.acceptRun(digits)
+	if l.accept(".eE") {
+		if l.accept(".") {
+			l.acceptRun(digits)
+		}
+		if l.accept("eE") {
+			l.accept("+-")
+			l.acceptRun("0123456789")
+		}
+		if !isAlphaNumeric(l.peek()) {
+			l.emit(tokenFloat)
+			return lexTop
+		}
+	} else if !isAlphaNumeric(l.peek()) {
 		l.emit(tokenInt)
-	} else {
-		return l.errorf("expected number literal")
+		return lexTop
 	}
-	return lexTop
-}
-
-func acceptInt(l *lexer) bool {
-	digits := "0123456789"
-	if l.accept("0") && l.accept("xX") {
-		digits = "0123456789abcdefABCDEF"
-	}
-	l.acceptRun(digits)
-	// Next thing mustn't be alphanumeric.
-	if isAlphaNumeric(l.next()) {
-		return false
-	}
-	l.backup()
-	return true
-}
-
-func acceptFloat(l *lexer) bool {
-	digits := "0123456789"
-	if l.accept("0") && l.accept("xX") {
-		digits = "0123456789abcdefABCDEF"
-	}
-	l.acceptRun(digits)
-	if l.accept(".") {
-		l.acceptRun(digits)
-	}
-	if l.accept("eE") {
-		l.accept("+-")
-		l.acceptRun("0123456789")
-	}
-	// Next thing mustn't be alphanumeric.
-	if isAlphaNumeric(l.next()) {
-		return false
-	}
-	l.backup()
-	return true
+	return l.errorf("expected number literal")
 }
 
 func lexString(l *lexer) lexStateFn {

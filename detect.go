@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"sync"
+	"reflect"
 )
 
 func detect(a *analyzer) *detector {
@@ -15,15 +15,23 @@ type detector struct {
 	nodes      chan node
 }
 
-// Run rewrites nodes to be a correct vim script.
+// Run converts nodes to be a correct vim script.
+// If semantic errors are found, emits *errorNode.
 func (d *detector) Run() {
 	for tNode := range d.typedNodes {
-		if top, ok := tNode.(*typedTopLevelNode); ok {
-			d.emit(d.detect(top))
-		} else if e, ok := tNode.(*typedErrorNode); ok {
-			d.emit(e)
-		} else {
-			d.err(fmt.Errorf("unknown node: %+v", tNode), tNode)
+		switch node := tNode.Node().(type) {
+		case *topLevelNode:
+			d.emit(d.detect(&tNode))
+		case *errorNode:
+			d.emit(node)
+		default:
+			d.err(
+				fmt.Errorf(
+					"fatal: topLevelNode or errorNode is needed at top level (%+v)",
+					reflect.TypeOf(tNode.node),
+				),
+				node.Position(),
+			)
 		}
 	}
 	close(d.nodes)
@@ -34,57 +42,21 @@ func (d *detector) emit(node node) {
 	d.nodes <- node
 }
 
-func (d *detector) err(err error, node node) {
-	pos := node.Position()
-	errNode := &errorNode{
+func (d *detector) err(err error, pos *Pos) {
+	d.emit(&errorNode{
 		pos,
-		fmt.Errorf("[analyze] %s:%d:%d: "+err.Error(), d.name, pos.line, pos.col+1),
-	}
-	d.emit(&typedErrorNode{errNode})
-}
-
-func (d *detector) detect(top *typedTopLevelNode) node {
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		d.rewriteUnderscore(top)
-		wg.Done()
-	}()
-
-	// TODO
-
-	wg.Wait()
-	return top.topLevelNode
-}
-
-// rewriteUnderscore rewrites underscore nodes to be unused variables
-// which doesn't conflict with others.
-func (d *detector) rewriteUnderscore(top *typedTopLevelNode) {
-	bodies := make(chan []node, 16)
-	done := make(chan bool, 1)
-
-	go func() {
-		for body := range bodies {
-			d.rewriteUnderscoreBody(body)
-		}
-		done <- true
-	}()
-
-	walkNodes(top, func(n node) bool {
-		switch nn := n.(type) {
-		case *topLevelNode:
-			bodies <- nn.body
-		case *funcStmtOrExpr:
-			bodies <- nn.body
-		}
-		return true
+		fmt.Errorf("[detect] %s:%d:%d: "+err.Error(), d.name, pos.line, pos.col+1),
 	})
-	close(bodies)
-
-	<-done
 }
 
-func (d *detector) rewriteUnderscoreBody(body []node) {
-	// TODO
+// detect detects semantic errors.
+// And it converts typedNode to node.
+// If semantic errors exist, *errorNode is returned.
+func (d *detector) detect(top *typedNode) node {
+	return walkNodes(top, func(_ *walkCtrl, n node) node {
+		// TODO detect semantic errors.
+
+		// Unwrap node from typedNode.
+		return n.Node()
+	})
 }
