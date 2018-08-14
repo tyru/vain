@@ -1,1 +1,2 @@
 (if 1 ((call 'f 42) 12) ((if 2 (45 68) (90))))
+(while 42 ((call 'echo "hello!")))

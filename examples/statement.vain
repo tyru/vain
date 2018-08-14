@@ -7,3 +7,7 @@ if 1 {
 } else {
   90
 }
+
+while 42 {
+  echo("hello!")
+}

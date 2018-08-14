@@ -84,6 +84,8 @@ func (t *vimTranslator) toReader(node, parent node) io.Reader {
 		return t.newConstStatementReader(n, parent)
 	case *ifStatement:
 		return t.newIfStatementReader(n, parent, true)
+	case *whileStatement:
+		return t.newWhileStatementReader(n, parent)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, parent)
 	case *orNode:
@@ -384,6 +386,37 @@ func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, top
 		buf.WriteString(t.indent())
 		buf.WriteString("endif")
 	}
+	return strings.NewReader(buf.String())
+}
+
+func (t *vimTranslator) newWhileStatementReader(node *whileStatement, parent node) io.Reader {
+	var cond bytes.Buffer
+	_, err := io.Copy(&cond, t.toReader(node.cond, node))
+	if err != nil {
+		return t.err(err, node.cond)
+	}
+	var bodyList []string
+	for i := range node.body {
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, t.toReader(node.body[i], node))
+		if err != nil {
+			return t.err(err, node.body[i])
+		}
+		bodyList = append(bodyList, buf.String())
+	}
+	var buf bytes.Buffer
+	buf.WriteString("while ")
+	buf.WriteString(t.paren(cond.String(), node.cond))
+	buf.WriteString("\n")
+	t.incIndent()
+	for i := range bodyList {
+		buf.WriteString(t.indent())
+		buf.WriteString(bodyList[i])
+		buf.WriteString("\n")
+	}
+	t.decIndent()
+	buf.WriteString(t.indent())
+	buf.WriteString("endwhile")
 	return strings.NewReader(buf.String())
 }
 

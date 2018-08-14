@@ -272,6 +272,20 @@ func doWalk(ctrl *walkCtrl, n node, f func(*walkCtrl, node) node) node {
 			}
 		}
 		return r
+	case *whileStatement:
+		nn.cond = doWalk(ctrl, nn.cond, f)
+		if !ctrl.followSiblings {
+			ctrl.followSiblings = true
+			return r
+		}
+		for i := range nn.body {
+			nn.body[i] = doWalk(ctrl, nn.body[i], f)
+			if !ctrl.followSiblings {
+				ctrl.followSiblings = true
+				return r
+			}
+		}
+		return r
 	case *ternaryNode:
 		nn.cond = doWalk(ctrl, nn.cond, f)
 		if !ctrl.followSiblings {

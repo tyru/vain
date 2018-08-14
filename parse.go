@@ -226,6 +226,10 @@ func (p *parser) acceptStmtOrExpr() (node, bool) {
 		p.backup(p.token)
 		return p.acceptIfStatement()
 	}
+	if p.accept(tokenWhile) {
+		p.backup(p.token)
+		return p.acceptWhileStatement()
+	}
 	if p.accept(tokenImport) || p.accept(tokenFrom) {
 		p.backup(p.token)
 		return p.acceptImportStatement()
@@ -410,6 +414,41 @@ func (p *parser) acceptIfStatement() (node, bool) {
 		}
 	}
 	node := &ifStatement{pos, cond, body, els}
+	return node, true
+}
+
+type whileStatement struct {
+	*Pos
+	cond expr
+	body []node
+}
+
+func (node *whileStatement) Node() node {
+	return node
+}
+
+func (node *whileStatement) IsExpr() bool {
+	return false
+}
+
+// whileStatement := "while" *blank expr *blank block
+func (p *parser) acceptWhileStatement() (node, bool) {
+	if !p.accept(tokenWhile) {
+		p.errorf("expected while statement but got %s", tokenName(tokenIf), tokenName(p.peek().typ))
+		return nil, false
+	}
+	p.acceptBlanks()
+	pos := p.token.pos
+	cond, ok := p.acceptExpr()
+	if !ok {
+		return nil, false
+	}
+	p.acceptBlanks()
+	body, ok := p.acceptBlock()
+	if !ok {
+		return nil, false
+	}
+	node := &whileStatement{pos, cond, body}
 	return node, true
 }
 

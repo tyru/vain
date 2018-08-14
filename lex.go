@@ -113,6 +113,7 @@ const (
 	tokenFrom
 	tokenIf
 	tokenElse
+	tokenWhile
 	tokenComment
 	tokenUnderscore
 )
@@ -247,6 +248,8 @@ func tokenName(typ tokenType) string {
 		return "\"if\""
 	case tokenElse:
 		return "\"else\""
+	case tokenWhile:
+		return "\"while\""
 	}
 	return ""
 }
@@ -690,6 +693,9 @@ func lexTop(l *lexer) lexStateFn {
 		return lexTop
 	case "else":
 		l.emit(tokenElse)
+		return lexTop
+	case "while":
+		l.emit(tokenWhile)
 		return lexTop
 	case "true", "false":
 		l.emit(tokenBool)

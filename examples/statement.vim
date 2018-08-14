@@ -7,3 +7,6 @@ elseif 2
 else
   90
 endif
+while 42
+  echo("hello!")
+endwhile
