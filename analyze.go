@@ -89,13 +89,14 @@ func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
 }
 
 // convertPre converts some specific nodes.
+// It also performs some semantic checks.
 func (a *analyzer) convertPre(top *topLevelNode) (*topLevelNode, []errorNode) {
 	errs := a.checkToplevelReturn(top)
 	top.body = a.convertVariableNames(top.body)
 	return top, errs
 }
 
-// convertPost converts some specific nodes.
+// convertPost converts *typedNode to node.
 func (a *analyzer) convertPost(tNode *typedNode) (node, []errorNode) {
 	return walkNodes(tNode, func(_ *walkCtrl, n node) node {
 		// Unwrap node from typedNode.
