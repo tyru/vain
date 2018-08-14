@@ -368,13 +368,14 @@ func (node *ifStatement) IsExpr() bool {
 	return false
 }
 
-// ifStatement := "if" expr *blank block
+// ifStatement := "if" *blank expr *blank block
 //                [ *blank "else" *blank ( ifStatement | block ) ]
 func (p *parser) acceptIfStatement() (node, bool) {
 	if !p.accept(tokenIf) {
 		p.errorf("expected if statement but got %s", tokenName(tokenIf), tokenName(p.peek().typ))
 		return nil, false
 	}
+	p.acceptBlanks()
 	pos := p.token.pos
 	cond, ok := p.acceptExpr()
 	if !ok {
