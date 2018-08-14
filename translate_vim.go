@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-func translateVim(a *analyzer) translator {
-	return &vimTranslator{a.name, a.nodes, make(chan io.Reader), "  ", make([]io.Reader, 0, 16)}
+func translateVim(d *detector) translator {
+	return &vimTranslator{d.name, d.nodes, make(chan io.Reader), "  ", make([]io.Reader, 0, 16)}
 }
 
 type vimTranslator struct {
@@ -47,10 +47,6 @@ func (t *vimTranslator) emit(r io.Reader) {
 	t.readers <- r
 }
 
-func (t *vimTranslator) errParse(node *errorNode) io.Reader {
-	return &errorReader{node.err}
-}
-
 func (t *vimTranslator) err(err error, node node) io.Reader {
 	pos := node.Position()
 	return &errorReader{
@@ -66,7 +62,7 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
 	switch n := node.(type) {
 	case *errorNode:
-		return t.errParse(n)
+		return &errorReader{n.err}
 	case *topLevelNode:
 		return t.newTopLevelNodeReader(n, level)
 	case *importStatement:
@@ -75,6 +71,8 @@ func (t *vimTranslator) toReader(node, parent node, level int) io.Reader {
 		return t.newFuncReader(n, parent, level)
 	case *returnStatement:
 		return t.newReturnNodeReader(n, parent, level)
+	case *constStatement:
+		return t.newConstStatementReader(n, parent, level)
 	case *ifStatement:
 		return t.newIfStatementReader(n, parent, level, true)
 	case *ternaryNode:
@@ -375,6 +373,35 @@ func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, 
 		return t.err(err, node.left)
 	}
 	s := fmt.Sprintf("return %s", t.paren(value.String(), node.left))
+	return strings.NewReader(s)
+}
+
+func (t *vimTranslator) newConstStatementReader(node *constStatement, parent node, level int) io.Reader {
+	var left bytes.Buffer
+	if len(node.left) == 1 {
+		_, err := io.Copy(&left, t.toReader(&node.left[0], parent, level))
+		if err != nil {
+			return t.err(err, &node.left[0])
+		}
+	} else {
+		left.WriteString("[")
+		for i := range node.left {
+			if i > 0 {
+				left.WriteString(",")
+			}
+			_, err := io.Copy(&left, t.toReader(&node.left[i], parent, level))
+			if err != nil {
+				return t.err(err, &node.left[i])
+			}
+		}
+		left.WriteString("]")
+	}
+	var right bytes.Buffer
+	_, err := io.Copy(&right, t.toReader(node.right, parent, level))
+	if err != nil {
+		return t.err(err, node.right)
+	}
+	s := fmt.Sprintf("let %s = %s", left.String(), right.String())
 	return strings.NewReader(s)
 }
 

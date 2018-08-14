@@ -114,6 +114,7 @@ const (
 	tokenIf
 	tokenElse
 	tokenComment
+	tokenUnderscore
 )
 
 func tokenName(typ tokenType) string {
@@ -695,6 +696,9 @@ func lexTop(l *lexer) lexStateFn {
 		return lexTop
 	case "null", "none":
 		l.emit(tokenNone)
+		return lexTop
+	case "_":
+		l.emit(tokenUnderscore)
 		return lexTop
 	}
 

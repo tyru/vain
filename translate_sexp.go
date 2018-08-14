@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-func translateSexp(a *analyzer) translator {
-	return &sexpTranslator{a.name, a.nodes, make(chan io.Reader), "  "}
+func translateSexp(d *detector) translator {
+	return &sexpTranslator{d.name, d.nodes, make(chan io.Reader), "  "}
 }
 
 type sexpTranslator struct {
@@ -34,10 +34,6 @@ func (t *sexpTranslator) emit(r io.Reader) {
 	t.readers <- r
 }
 
-func (t *sexpTranslator) errParse(node *errorNode) io.Reader {
-	return &errorReader{node.err}
-}
-
 func (t *sexpTranslator) err(err error, node node) io.Reader {
 	pos := node.Position()
 	return &errorReader{
@@ -53,7 +49,7 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
 	switch n := node.(type) {
 	case *errorNode:
-		return t.errParse(n)
+		return &errorReader{n.err}
 	case *topLevelNode:
 		return t.newTopLevelNodeReader(n, level)
 	case *importStatement:
@@ -62,6 +58,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newFuncReader(n, level)
 	case *returnStatement:
 		return t.newReturnNodeReader(n, level)
+	case *constStatement:
+		return t.newConstStatementReader(n, level)
 	case *ifStatement:
 		return t.newIfStatementReader(n, level)
 	case *ternaryNode:
@@ -257,6 +255,35 @@ func (t *sexpTranslator) newReturnNodeReader(node *returnStatement, level int) i
 		return t.err(err, node.left)
 	}
 	s := fmt.Sprintf("(return %s)", value.String())
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newConstStatementReader(node *constStatement, level int) io.Reader {
+	var left bytes.Buffer
+	if len(node.left) == 1 {
+		_, err := io.Copy(&left, t.toReader(&node.left[0], level))
+		if err != nil {
+			return t.err(err, &node.left[0])
+		}
+	} else {
+		left.WriteString("(")
+		for i := range node.left {
+			if i > 0 {
+				left.WriteString(" ")
+			}
+			_, err := io.Copy(&left, t.toReader(&node.left[i], level))
+			if err != nil {
+				return t.err(err, &node.left[i])
+			}
+		}
+		left.WriteString(")")
+	}
+	var right bytes.Buffer
+	_, err := io.Copy(&right, t.toReader(node.right, level))
+	if err != nil {
+		return t.err(err, node.right)
+	}
+	s := fmt.Sprintf("(const %s %s)", left.String(), right.String())
 	return strings.NewReader(s)
 }
 

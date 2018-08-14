@@ -1,0 +1,2 @@
+(const 'foo 42)
+(const ('foo '_ 'baz) 42)
