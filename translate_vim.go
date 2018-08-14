@@ -86,6 +86,8 @@ func (t *vimTranslator) toReader(node, parent node) io.Reader {
 		return t.newIfStatementReader(n, parent, true)
 	case *whileStatement:
 		return t.newWhileStatementReader(n, parent)
+	case *forStatement:
+		return t.newForStatementReader(n, parent)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, parent)
 	case *orNode:
@@ -349,7 +351,7 @@ func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, top
 	}
 	var buf bytes.Buffer
 	buf.WriteString("if ")
-	buf.WriteString(t.paren(cond.String(), node.cond))
+	buf.WriteString(cond.String())
 	buf.WriteString("\n")
 	t.incIndent()
 	for i := range bodyList {
@@ -390,33 +392,67 @@ func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, top
 }
 
 func (t *vimTranslator) newWhileStatementReader(node *whileStatement, parent node) io.Reader {
-	var cond bytes.Buffer
-	_, err := io.Copy(&cond, t.toReader(node.cond, node))
+	var buf bytes.Buffer
+	buf.WriteString("while ")
+	_, err := io.Copy(&buf, t.toReader(node.cond, node))
 	if err != nil {
 		return t.err(err, node.cond)
 	}
-	var bodyList []string
+	buf.WriteString("\n")
+	t.incIndent()
 	for i := range node.body {
-		var buf bytes.Buffer
+		buf.WriteString(t.indent())
 		_, err = io.Copy(&buf, t.toReader(node.body[i], node))
 		if err != nil {
 			return t.err(err, node.body[i])
 		}
-		bodyList = append(bodyList, buf.String())
-	}
-	var buf bytes.Buffer
-	buf.WriteString("while ")
-	buf.WriteString(t.paren(cond.String(), node.cond))
-	buf.WriteString("\n")
-	t.incIndent()
-	for i := range bodyList {
-		buf.WriteString(t.indent())
-		buf.WriteString(bodyList[i])
 		buf.WriteString("\n")
 	}
 	t.decIndent()
 	buf.WriteString(t.indent())
 	buf.WriteString("endwhile")
+	return strings.NewReader(buf.String())
+}
+
+func (t *vimTranslator) newForStatementReader(node *forStatement, parent node) io.Reader {
+	var buf bytes.Buffer
+	buf.WriteString("for ")
+	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
+		buf.WriteString("[")
+		for i := range list.value {
+			if i > 0 {
+				buf.WriteString(",")
+			}
+			_, err := io.Copy(&buf, t.toReader(list.value[i], parent))
+			if err != nil {
+				return t.err(err, list.value[i])
+			}
+		}
+		buf.WriteString("]")
+	} else {
+		_, err := io.Copy(&buf, t.toReader(node.left, parent))
+		if err != nil {
+			return t.err(err, node.left)
+		}
+	}
+	buf.WriteString(" in ")
+	_, err := io.Copy(&buf, t.toReader(node.right, parent))
+	if err != nil {
+		return t.err(err, node.right)
+	}
+	buf.WriteString("\n")
+	t.incIndent()
+	for i := range node.body {
+		buf.WriteString(t.indent())
+		_, err = io.Copy(&buf, t.toReader(node.body[i], node))
+		if err != nil {
+			return t.err(err, node.body[i])
+		}
+		buf.WriteString("\n")
+	}
+	t.decIndent()
+	buf.WriteString(t.indent())
+	buf.WriteString("endfor")
 	return strings.NewReader(buf.String())
 }
 

@@ -68,6 +68,8 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 		return t.newIfStatementReader(n, level)
 	case *whileStatement:
 		return t.newWhileStatementReader(n, level)
+	case *forStatement:
+		return t.newForStatementReader(n, level)
 	case *ternaryNode:
 		return t.newTernaryNodeReader(n, level)
 	case *orNode:
@@ -344,6 +346,44 @@ func (t *sexpTranslator) newWhileStatementReader(node *whileStatement, level int
 		bodyList = append(bodyList, buf.String())
 	}
 	s := fmt.Sprintf("(while %s (%s))", cond.String(), strings.Join(bodyList, " "))
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newForStatementReader(node *forStatement, level int) io.Reader {
+	var left bytes.Buffer
+	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
+		left.WriteString("(")
+		for i := range list.value {
+			if i > 0 {
+				left.WriteString(" ")
+			}
+			_, err := io.Copy(&left, t.toReader(list.value[i], level))
+			if err != nil {
+				return t.err(err, list.value[i])
+			}
+		}
+		left.WriteString(")")
+	} else {
+		_, err := io.Copy(&left, t.toReader(node.left, level))
+		if err != nil {
+			return t.err(err, node.left)
+		}
+	}
+	var right bytes.Buffer
+	_, err := io.Copy(&right, t.toReader(node.right, level))
+	if err != nil {
+		return t.err(err, node.right)
+	}
+	var bodyList []string
+	for i := range node.body {
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, t.toReader(node.body[i], level))
+		if err != nil {
+			return t.err(err, node.body[i])
+		}
+		bodyList = append(bodyList, buf.String())
+	}
+	s := fmt.Sprintf("(for %s %s (%s))", left.String(), right.String(), strings.Join(bodyList, " "))
 	return strings.NewReader(s)
 }
 

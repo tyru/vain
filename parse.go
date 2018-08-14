@@ -230,6 +230,10 @@ func (p *parser) acceptStmtOrExpr() (node, bool) {
 		p.backup(p.token)
 		return p.acceptWhileStatement()
 	}
+	if p.accept(tokenFor) {
+		p.backup(p.token)
+		return p.acceptForStatement()
+	}
 	if p.accept(tokenImport) || p.accept(tokenFrom) {
 		p.backup(p.token)
 		return p.acceptImportStatement()
@@ -254,22 +258,15 @@ func (node *constStatement) IsExpr() bool {
 	return false
 }
 
-// constStatement := "const" ( identifier | destructuringAssignment ) "=" expr /
+// constStatement := "const" assignLhs "=" expr
 func (p *parser) acceptConstStatement() (node, bool) {
 	if !p.accept(tokenConst) {
 		p.errorf("expected %s but got %s", tokenName(tokenConst), tokenName(p.peek().typ))
 		return nil, false
 	}
 	pos := p.token.pos
-	var left node
-	var hasUnderscore bool
-	if p.accept(tokenIdentifier) {
-		left = &identifierNode{p.token.pos, p.token.val}
-	} else if ids, underscore, listpos, ok := p.acceptDestructuringAssignment(); ok {
-		left = &listNode{listpos, ids}
-		hasUnderscore = underscore
-	} else {
-		p.errorf("expected %s or destructuring assignment but got %s", tokenName(tokenIdentifier), tokenName(p.peek().typ))
+	left, hasUnderscore, ok := p.acceptAssignLHS()
+	if !ok {
 		return nil, false
 	}
 	if !p.accept(tokenEqual) {
@@ -282,6 +279,22 @@ func (p *parser) acceptConstStatement() (node, bool) {
 	}
 	node := &constStatement{pos, left, right, hasUnderscore}
 	return node, true
+}
+
+// assignLhs := identifier | destructuringAssignment
+func (p *parser) acceptAssignLHS() (node, bool, bool) {
+	var left node
+	var hasUnderscore bool
+	if p.accept(tokenIdentifier) {
+		left = &identifierNode{p.token.pos, p.token.val}
+	} else if ids, underscore, listpos, ok := p.acceptDestructuringAssignment(); ok {
+		left = &listNode{listpos, ids}
+		hasUnderscore = underscore
+	} else {
+		p.errorf("expected %s or destructuring assignment but got %s", tokenName(tokenIdentifier), tokenName(p.peek().typ))
+		return nil, false, false
+	}
+	return left, hasUnderscore, true
 }
 
 // destructuringAssignment := "[" *blank
@@ -450,6 +463,53 @@ func (p *parser) acceptWhileStatement() (node, bool) {
 		return nil, false
 	}
 	node := &whileStatement{pos, cond, body}
+	return node, true
+}
+
+type forStatement struct {
+	*Pos
+	left          node
+	right         expr
+	body          []node
+	hasUnderscore bool
+}
+
+func (node *forStatement) Node() node {
+	return node
+}
+
+func (node *forStatement) IsExpr() bool {
+	return false
+}
+
+// forStatement := "for" *blank assignLhs *blank "in" *blank expr *blank block
+func (p *parser) acceptForStatement() (node, bool) {
+	if !p.accept(tokenFor) {
+		p.errorf("expected for statement but got %s", tokenName(p.peek().typ))
+		return nil, false
+	}
+	p.acceptBlanks()
+	pos := p.token.pos
+	left, hasUnderscore, ok := p.acceptAssignLHS()
+	if !ok {
+		return nil, false
+	}
+	p.acceptBlanks()
+	if !p.accept(tokenIn) {
+		p.errorf("expected %s but got %s", tokenName(tokenIn), tokenName(p.peek().typ))
+		return nil, false
+	}
+	p.acceptBlanks()
+	right, ok := p.acceptExpr()
+	if !ok {
+		return nil, false
+	}
+	p.acceptBlanks()
+	body, ok := p.acceptBlock()
+	if !ok {
+		return nil, false
+	}
+	node := &forStatement{pos, left, right, body, hasUnderscore}
 	return node, true
 }
 

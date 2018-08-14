@@ -1,2 +1,4 @@
-(if 1 ((call 'f 42) 12) ((if 2 (45 68) (90))))
-(while 42 ((call 'echo "hello!")))
+(if 1 ((call 'f 42) 12) ((if 2 (45 68) (90 91))))
+(while 42 ((call 'echo "hello") (call 'echo "what's up")))
+(for 'v (list 1 2 3) ((call 'echo (+ "hey:" 'v)) (call 'echo "yo")))
+(for 'n (call 'range 1 100) ((if (== (% 'n 15) 0) ((call 'echo "fizzbuzz")) ((if (== (% 'n 5) 0) ((call 'echo "buzz")) ((if (== (% 'n 3) 0) ((call 'echo "fizz")) ((call 'echo (call (dot 'i 'toString)))))))))))
