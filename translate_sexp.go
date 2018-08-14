@@ -61,7 +61,7 @@ func (t *sexpTranslator) toReader(node node, level int) io.Reader {
 	case *funcStmtOrExpr:
 		return t.newFuncReader(n, level)
 	case *returnStatement:
-		return t.newUnaryOpNodeReader(n, level, "return")
+		return t.newReturnNodeReader(n, level)
 	case *ifStatement:
 		return t.newIfStatementReader(n, level)
 	case *ternaryNode:
@@ -244,6 +244,19 @@ func (t *sexpTranslator) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		strings.Join(args, " "),
 		retType,
 		body)
+	return strings.NewReader(s)
+}
+
+func (t *sexpTranslator) newReturnNodeReader(node *returnStatement, level int) io.Reader {
+	if node.left == nil {
+		return strings.NewReader("(return)")
+	}
+	var value bytes.Buffer
+	_, err := io.Copy(&value, t.toReader(node.left, level))
+	if err != nil {
+		return t.err(err, node.left)
+	}
+	s := fmt.Sprintf("(return %s)", value.String())
 	return strings.NewReader(s)
 }
 

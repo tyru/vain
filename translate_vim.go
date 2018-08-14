@@ -366,12 +366,15 @@ func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, lev
 }
 
 func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node, level int) io.Reader {
-	var value bytes.Buffer
-	_, err := io.Copy(&value, t.toReader(node.Value(), parent, level))
-	if err != nil {
-		return t.err(err, node.Value())
+	if node.left == nil {
+		return strings.NewReader("return")
 	}
-	s := fmt.Sprintf("return %s", t.paren(value.String(), node.Value()))
+	var value bytes.Buffer
+	_, err := io.Copy(&value, t.toReader(node.left, parent, level))
+	if err != nil {
+		return t.err(err, node.left)
+	}
+	s := fmt.Sprintf("return %s", t.paren(value.String(), node.left))
 	return strings.NewReader(s)
 }
 

@@ -35,6 +35,9 @@ function! s:f13(a,b) abort
 " 42
 endfunction
 " {->return 42}
+" {->return 42}
+" {->return}
+" {->return}
 " {->1}
 " {->2}
 " 

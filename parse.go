@@ -230,18 +230,20 @@ func (node *returnStatement) IsExpr() bool {
 	return false
 }
 
-func (node *returnStatement) Value() node {
-	return node.left
-}
-
-// TODO expr should be omittable.
-// returnStatement := "return" [ expr ]
+// returnStatement := "return" ( expr | LF | "}")
 func (p *parser) acceptReturnStatement() (node, bool) {
 	if !p.accept(tokenReturn) {
 		p.errorf("expected %s but got %s", tokenName(tokenReturn), tokenName(p.peek().typ))
 		return nil, false
 	}
 	ret := p.token
+	if p.accept(tokenNewline) {
+		return &returnStatement{ret.pos, nil, nil}, true
+	}
+	if p.accept(tokenCClose) { // end of block
+		p.backup(p.token)
+		return &returnStatement{ret.pos, nil, nil}, true
+	}
 	expr, ok := p.acceptExpr()
 	if !ok {
 		return nil, false

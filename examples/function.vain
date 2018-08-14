@@ -20,6 +20,13 @@ func f13(
   a: Int, b:Int,
 ) 42
 func () {return 42}
+func () {
+  return 42
+}
+func () {return}
+func () {
+  return
+}
 func () 1
 func <autoload> () 2
 func <autoload> () {}
