@@ -199,10 +199,6 @@ func (p *parser) acceptStmtOrExpr() (node, bool) {
 	}
 
 	// Statement
-	if p.accept(tokenImport) || p.accept(tokenFrom) {
-		p.backup(p.token)
-		return p.acceptImportStatement()
-	}
 	if p.accept(tokenFunc) {
 		p.backup(p.token)
 		return p.acceptFunction(false)
@@ -214,6 +210,10 @@ func (p *parser) acceptStmtOrExpr() (node, bool) {
 	if p.accept(tokenIf) {
 		p.backup(p.token)
 		return p.acceptIfStatement()
+	}
+	if p.accept(tokenImport) || p.accept(tokenFrom) {
+		p.backup(p.token)
+		return p.acceptImportStatement()
 	}
 
 	// Expression
