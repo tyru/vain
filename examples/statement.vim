@@ -1,3 +1,4 @@
+scriptencoding utf-8
 if 1
   f(42)
   12

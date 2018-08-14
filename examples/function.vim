@@ -1,3 +1,4 @@
+scriptencoding utf-8
 function! s:f1() abort
 endfunction
 function! s:f2() abort

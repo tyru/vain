@@ -24,6 +24,7 @@ type vimTranslator struct {
 func (t *vimTranslator) Run() {
 	for node := range t.nodes {
 		toplevel := t.toReader(node, node)
+		t.emit(strings.NewReader("scriptencoding utf-8\n"))
 		if len(t.namedExprFuncs) > 0 {
 			t.emit(strings.NewReader("\" vain: begin named expression functions\n"))
 			for i := range t.namedExprFuncs {

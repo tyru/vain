@@ -1,3 +1,4 @@
+scriptencoding utf-8
 " 1 ? 2 : 3
 " 1 ? "12" : "34"
 " 1 && 2
