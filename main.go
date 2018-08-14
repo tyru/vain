@@ -117,7 +117,7 @@ func build(args []string) error {
 	return e.ErrorOrNil()
 }
 
-func transpileFile(dstpath, srcpath string, translate func(*detector) translator) error {
+func transpileFile(dstpath, srcpath string, translate func(*analyzer) translator) error {
 	src, err := os.Open(srcpath)
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func transpileFile(dstpath, srcpath string, translate func(*detector) translator
 	return os.Rename(tmpfile.Name(), dstpath)
 }
 
-func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*detector) translator) error {
+func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*analyzer) translator) error {
 	var content strings.Builder
 	_, err := io.Copy(&content, src)
 	if err != nil {
@@ -151,11 +151,10 @@ func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*det
 	lexer := lex(srcpath, content.String())
 	parser := parse(lexer)
 	analyzer := analyze(parser)
-	detector := detect(analyzer)
-	translator := translate(detector)
+	translator := translate(analyzer)
 	errs := make([]error, 0, 32)
 
-	// 6. []io.Reader -> Output
+	// 5. []io.Reader -> Output
 	go func() {
 		for r := range translator.Readers() {
 			_, err := io.Copy(dstbuf, r)
@@ -166,14 +165,11 @@ func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*det
 		done <- true
 	}()
 
-	// 5. []node -> Translate to string -> []io.Reader
+	// 4. []node -> Translate to string -> []io.Reader
 	// io.Reader can also have errors.
 	go translator.Run()
 
-	// 4. []typedNode -> Detect semantic errors -> []node
-	go detector.Run()
-
-	// 3. []node -> Add types -> []typedNode
+	// 3. []node -> Check semantic errors -> []node
 	go analyzer.Run()
 
 	// 2. []token -> Parse -> []node

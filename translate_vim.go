@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-func translateVim(d *detector) translator {
-	return &vimTranslator{d.name, d.nodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
+func translateVim(a *analyzer) translator {
+	return &vimTranslator{a.name, a.nodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
 }
 
 type vimTranslator struct {
@@ -69,7 +69,7 @@ func (t *vimTranslator) indent() string {
 
 func (t *vimTranslator) toReader(node, parent node) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
-	switch n := node.(type) {
+	switch n := node.Node().(type) {
 	case *errorNode:
 		return &errorReader{n.err}
 	case *topLevelNode:

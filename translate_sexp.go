@@ -12,8 +12,8 @@ import (
 // TODO newline
 // TODO customize indent, newline
 
-func translateSexp(d *detector) translator {
-	return &sexpTranslator{d.name, d.nodes, make(chan io.Reader), "  "}
+func translateSexp(a *analyzer) translator {
+	return &sexpTranslator{a.name, a.nodes, make(chan io.Reader), "  "}
 }
 
 type sexpTranslator struct {

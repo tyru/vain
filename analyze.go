@@ -4,17 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 )
 
 func analyze(p *parser) *analyzer {
-	return &analyzer{p.name, p.nodes, make(chan typedNode, 1)}
+	return &analyzer{p.name, p, make(chan node, 1)}
 }
 
 type analyzer struct {
-	name       string
-	nodes      chan node
-	typedNodes chan typedNode
+	name   string
+	parser *parser
+	nodes  chan node
 }
 
 type typedNode struct {
@@ -22,92 +21,86 @@ type typedNode struct {
 	typ string // expression type
 }
 
+// Node calls inner impl node recursively to get real node.
 func (node *typedNode) Node() node {
-	return node.node.Node() // Call inner impl node recursively to get real node.
+	return node.node.Node()
 }
 
 func (a *analyzer) Run() {
-	for node := range a.nodes {
+	for node := range a.parser.nodes {
 		if top, ok := node.Node().(*topLevelNode); ok {
-			t, errs := a.analyze(top)
+			top, errs := a.analyze(top)
 			if len(errs) > 0 {
 				for i := range errs {
-					a.emit(&typedNode{&errs[i], ""}) // type error, and so on
+					a.emit(&errs[i]) // type error, and so on
 				}
+				continue
 			}
-			a.emit(t)
+			a.emit(top)
 		} else if e, ok := node.Node().(*errorNode); ok {
-			a.emit(&typedNode{e, ""}) // parse error
+			a.emit(e) // parse error
 		} else {
-			a.err(fmt.Errorf("unknown node: %+v", node), node.Position())
+			err := fmt.Errorf("unknown node: %+v", node)
+			a.emit(a.err(err, node))
 		}
 	}
-	close(a.typedNodes)
+	close(a.nodes)
 }
 
 // emit passes an node back to the client.
-func (a *analyzer) emit(tNode *typedNode) {
-	a.typedNodes <- *tNode
+func (a *analyzer) emit(n node) {
+	a.nodes <- n
 }
 
-func (a *analyzer) err(err error, pos *Pos) {
-	errNode := &errorNode{
+func (a *analyzer) err(err error, n node) *errorNode {
+	pos := n.Position()
+	return &errorNode{
 		pos,
 		fmt.Errorf("[analyze] %s:%d:%d: "+err.Error(), a.name, pos.line, pos.col+1),
 	}
-	a.emit(&typedNode{errNode, ""})
 }
 
-func (a *analyzer) analyze(top *topLevelNode) (*typedNode, []errorNode) {
-	var tNode *typedNode
-	errNodes := make([]errorNode, 0, 8)
+func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
+	result, errs := a.convertPre(top)
+	if len(errs) > 0 {
+		return nil, errs
+	}
 
-	var wg sync.WaitGroup
-	errs := make(chan errorNode, 8)
-	done := make(chan bool, 1)
+	tNode, errs := a.infer(result)
+	if len(errs) > 0 {
+		return nil, errs
+	}
 
-	go func() {
-		for e := range errs {
-			errNodes = append(errNodes, e)
-		}
-		done <- true
-	}()
+	n, errs := a.convertPost(tNode)
+	if len(errs) > 0 {
+		return nil, errs
+	}
 
-	wg.Add(1)
-	go func() {
-		var e *errorNode
-		top, e = a.convert(top)
-		if e == nil {
-			tNode, e = a.infer(top)
-		}
-		if e != nil {
-			errs <- *e
-		}
-		wg.Done()
-	}()
+	result, ok := n.Node().(*topLevelNode)
+	if !ok {
+		err := a.err(
+			fmt.Errorf("fatal: topLevelNode is needed at top level (%+v)", n.Node()),
+			top,
+		)
+		return nil, []errorNode{*err}
+	}
 
-	wg.Add(1)
-	go func() {
-		checkErrs := a.check(top)
-		for i := range checkErrs {
-			errs <- checkErrs[i]
-		}
-		wg.Done()
-	}()
-
-	// Wait convert() and check().
-	wg.Wait()
-	// Wait errNodes receives all errors.
-	close(errs)
-	<-done
-
-	return tNode, errNodes
+	return result, errs
 }
 
-// convert converts some specific nodes.
-func (a *analyzer) convert(top *topLevelNode) (*topLevelNode, *errorNode) {
+// convertPre converts some specific nodes.
+func (a *analyzer) convertPre(top *topLevelNode) (*topLevelNode, []errorNode) {
+	errs := a.checkToplevelReturn(top)
 	top.body = a.convertVariableNames(top.body)
-	return top, nil
+	return top, errs
+}
+
+// convertPost converts some specific nodes.
+func (a *analyzer) convertPost(tNode *typedNode) (node, []errorNode) {
+	return walkNodes(tNode, func(_ *walkCtrl, n node) node {
+		// Unwrap node from typedNode.
+		return n.Node()
+	}), nil
 }
 
 // convertUnderscore converts variable name in the scope of body.
@@ -160,50 +153,35 @@ func (a *analyzer) convertVariableNames(body []node) []node {
 }
 
 // infer infers each node's type and return the tree of *typedNode.
-func (a *analyzer) infer(top *topLevelNode) (*typedNode, *errorNode) {
+func (a *analyzer) infer(top *topLevelNode) (*typedNode, []errorNode) {
 	typedTop := walkNodes(top, func(_ *walkCtrl, n node) node {
 		return &typedNode{n, ""} // TODO
 	}).(*typedNode) // returned node must be *topLevelNode
 	return typedTop, nil
 }
 
-// check checks if semantic errors exist in top.
-// If semantic errors exist, return value is non-nil.
-func (a *analyzer) check(top *topLevelNode) []errorNode {
-
-	// TODO other checks
-
-	return a.checkToplevelReturn(top)
-}
-
 // checkToplevelReturn checks if returnStatement exists under topLevelNode.
 // It doesn't check inside expression and function.
-func (a *analyzer) checkToplevelReturn(n *topLevelNode) []errorNode {
+func (a *analyzer) checkToplevelReturn(top *topLevelNode) []errorNode {
 	errNodes := make([]errorNode, 0, 8)
-	for i := range n.body {
+	// Check inner nodes of if, while, for, try, ...
+	walkNodes(top, func(ctrl *walkCtrl, n node) node {
 		if n.IsExpr() {
-			continue
+			ctrl.dontFollowInner()
+			return n
 		}
-		if _, ok := n.body[i].(*funcStmtOrExpr); ok {
-			continue
+		if _, ok := n.Node().(*funcStmtOrExpr); ok {
+			ctrl.dontFollowInner()
+			return n
 		}
-		// Check inner nodes of if, while, for, try, ...
-		walkNodes(n.body[i], func(ctrl *walkCtrl, inner node) node {
-			if _, ok := inner.(*funcStmtOrExpr); ok {
-				ctrl.dontFollowSiblings()
-				ctrl.dontFollowInner()
-				return inner
-			}
-			if ret, ok := inner.(*returnStatement); ok {
-				errNodes = append(errNodes, errorNode{
-					ret.Pos,
-					errors.New("return statement found at top level"),
-				})
-				return inner
-			}
-			return inner
-		})
-	}
+		if ret, ok := n.Node().(*returnStatement); ok {
+			errNodes = append(errNodes, *a.err(
+				errors.New("return statement found at top level"),
+				ret,
+			))
+		}
+		return n
+	})
 	return errNodes
 }
 
