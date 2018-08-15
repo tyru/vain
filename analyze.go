@@ -65,22 +65,29 @@ func (a *analyzer) err(err error, n node) *errorNode {
 }
 
 func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
-	result, errs := a.convertPre(top)
+	// Perform semantics checks.
+	errs := a.check(top)
 	if len(errs) > 0 {
 		return nil, errs
 	}
 
-	tNode, errs := a.infer(result)
+	// Convert node inplace.
+	a.convertPre(top)
+
+	// Infer type (convert the node to *typedNode).
+	tNode, errs := a.infer(top)
 	if len(errs) > 0 {
 		return nil, errs
 	}
 
+	// TODO Semantics checks and node conversion by its types.
+
+	// Convert *typedNode to node.
 	n, errs := a.convertPost(tNode)
 	if len(errs) > 0 {
 		return nil, errs
 	}
-
-	result, ok := n.Node().(*topLevelNode)
+	top, ok := n.Node().(*topLevelNode)
 	if !ok {
 		err := a.err(
 			fmt.Errorf("fatal: topLevelNode is needed at top level (%+v)", n.Node()),
@@ -89,12 +96,11 @@ func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
 		return nil, []errorNode{*err}
 	}
 
-	return result, errs
+	return top, errs
 }
 
-// convertPre converts some specific nodes.
-// It also performs some semantic checks.
-func (a *analyzer) convertPre(top *topLevelNode) (*topLevelNode, []errorNode) {
+// check checks the semantic errors.
+func (a *analyzer) check(top *topLevelNode) []errorNode {
 	errs := make([]errorNode, 0, 16)
 	checkers := newSeriesCheckers(
 		a.checkToplevelReturn,
@@ -107,8 +113,12 @@ func (a *analyzer) convertPre(top *topLevelNode) (*topLevelNode, []errorNode) {
 		return n
 	})
 
+	return errs
+}
+
+// convertPre converts some specific nodes inplace.
+func (a *analyzer) convertPre(top *topLevelNode) {
 	top.body = a.convertVariableNames(top.body)
-	return top, errs
 }
 
 type checkFn func(*walkCtrl, node) []errorNode
