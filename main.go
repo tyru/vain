@@ -43,131 +43,198 @@ COMMAND
 }
 
 func build(args []string) error {
-	files := make(chan string, 32)
-	var wg sync.WaitGroup
+	buildErrs := make(chan error, 16)
+	errs := make([]error, 0, 16)
+	done := make(chan bool, 1)
 
-	// 2. files -> Transpile given files
-	astErrs := make([]error, 16)
-	vimErrs := make([]error, 16)
+	// 3. Collect errors
+	go func() {
+		for err := range buildErrs {
+			errs = append(errs, err)
+		}
+		done <- true
+	}()
+
+	var wg sync.WaitGroup
+	files := make(chan string, 32)
+
+	// 2. files -> Transpile given files -> file.vast, file.vim
 	wg.Add(1)
 	go func() {
-		for src := range files {
-			// file.vain -> file.vast
+		for file := range files {
 			wg.Add(1)
-			go func(src string) {
-				dst := src[:len(src)-len(".vain")] + ".vast"
-				err := transpileFile(dst, src, translateSexp)
-				if err != nil {
-					astErrs = append(astErrs, err)
+			go func(file string) {
+				if err := genFiles(file); err != nil {
+					buildErrs <- err
 				}
 				wg.Done()
-			}(src)
-			// file.vain -> file.vim
-			wg.Add(1)
-			go func(src string) {
-				dst := src[:len(src)-len(".vain")] + ".vim"
-				err := transpileFile(dst, src, translateVim)
-				if err != nil {
-					vimErrs = append(vimErrs, err)
-				}
-				wg.Done()
-			}(src)
+			}(file)
 		}
 		wg.Done()
 	}()
 
 	// 1. Collect .vain files -> files
-	var err error
+	wg.Add(1)
 	go func() {
-		if len(args) > 0 {
-			// If arguments were given, pass them as filenames.
-			for i := range args {
-				if _, e := os.Stat(args[i]); os.IsNotExist(e) {
-					err = e
-					close(files)
-					return
-				}
-			}
-			for i := range args {
-				files <- args[i]
-			}
-			close(files)
-			return
+		if err := collectTargetFiles(args, files); err != nil {
+			buildErrs <- err
 		}
-		// Otherwise, collect .vain files under current directory.
-		err = filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if strings.HasSuffix(strings.ToLower(path), ".vain") {
-				files <- path
-			}
-			return nil
-		})
 		close(files)
+		wg.Done()
 	}()
 
 	wg.Wait()
+	close(buildErrs)
+	<-done
 
-	if err != nil {
-		return err
-	}
-	e := multierror.Append(nil, astErrs...)
-	e = multierror.Append(e, vimErrs...)
-	return e.ErrorOrNil()
+	return multierror.Append(nil, errs...).ErrorOrNil()
 }
 
-func transpileFile(dstpath, srcpath string, translate func(*analyzer) translator) error {
-	src, err := os.Open(srcpath)
+func genFiles(name string) error {
+	src, err := os.Open(name)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
 
-	tmpfile, err := ioutil.TempFile("", "example")
+	var content strings.Builder
+	_, err = io.Copy(&content, src)
 	if err != nil {
 		return err
 	}
 
-	err = transpile(tmpfile, src, srcpath, translate)
-	tmpfile.Close()
+	sexpCh := make(chan node, 1)
+	vimCh := make(chan node, 1)
+
+	transpiler := transpile(name, content.String())
+	sexpTranslator := translateSexp(name, sexpCh)
+	vimTranslator := translateVim(name, vimCh)
+	vastFile := name[:len(name)-len(".vain")] + ".vast"
+	vimFile := name[:len(name)-len(".vain")] + ".vim"
+	writeErr := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	// 4. []io.Reader -> file.vast
+	wg.Add(1)
+	go func() {
+		writeErr <- writeReaders(sexpTranslator.Readers(), vastFile)
+		wg.Done()
+	}()
+
+	// 4. []io.Reader -> file.vim
+	wg.Add(1)
+	go func() {
+		writeErr <- writeReaders(vimTranslator.Readers(), vimFile)
+		wg.Done()
+	}()
+
+	// 3. []node -> []io.Reader
+	// io.Reader can also have errors.
+	go sexpTranslator.Run()
+	go vimTranslator.Run()
+
+	// 2. []node -> sexpTranslator, vimTranslator
+	go func() {
+		for node := range transpiler.Nodes() {
+			sexpCh <- node
+			vimCh <- node
+		}
+		close(sexpCh)
+		close(vimCh)
+	}()
+
+	// 1. source code -> []node
+	go transpiler.Run()
+
+	wg.Wait()
+	close(writeErr)
+	for err := range writeErr {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeReaders(readers <-chan io.Reader, dst string) error {
+	tmpfile, err := ioutil.TempFile("", "vainsrc")
 	if err != nil {
+		return err
+	}
+	dstbuf := bufio.NewWriter(tmpfile)
+
+	for r := range readers {
+		if _, e := io.Copy(dstbuf, r); e != nil {
+			err = e
+			break
+		}
+	}
+
+	if err != nil {
+		tmpfile.Close()
 		os.Remove(tmpfile.Name())
 		return err
 	}
-
-	return os.Rename(tmpfile.Name(), dstpath)
-}
-
-func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*analyzer) translator) error {
-	var content strings.Builder
-	_, err := io.Copy(&content, src)
-	if err != nil {
+	if err := dstbuf.Flush(); err != nil {
 		return err
 	}
-	dstbuf := bufio.NewWriter(dst)
+	tmpfile.Close()
+	return os.Rename(tmpfile.Name(), dst)
+}
 
-	done := make(chan bool, 1)
-	lexer := lex(srcpath, content.String())
-	parser := parse(lexer)
-	analyzer := analyze(parser)
-	translator := translate(analyzer)
-	errs := make([]error, 0, 32)
-
-	// 5. []io.Reader -> Output
-	go func() {
-		for r := range translator.Readers() {
-			_, err := io.Copy(dstbuf, r)
-			if err != nil {
-				errs = append(errs, err)
+func collectTargetFiles(args []string, files chan<- string) error {
+	if len(args) > 0 {
+		// If arguments were given, pass them as filenames.
+		for i := range args {
+			if _, err := os.Stat(args[i]); os.IsNotExist(err) {
+				return err
 			}
 		}
+		for i := range args {
+			files <- args[i]
+		}
+		return nil
+	}
+	// Otherwise, collect .vain files under current directory.
+	return filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasSuffix(strings.ToLower(path), ".vain") {
+			files <- path
+		}
+		return nil
+	})
+}
+
+func transpile(name, input string) *transpiler {
+	return &transpiler{name, input, make(chan node, 1)}
+}
+
+func (t *transpiler) Nodes() <-chan node {
+	return t.outNodes
+}
+
+type transpiler struct {
+	name     string
+	input    string
+	outNodes chan node
+}
+
+func (t *transpiler) Run() {
+	done := make(chan bool, 1)
+	lexer := lex(t.name, t.input)
+	parser := parse(t.name, lexer.Tokens())
+	analyzer := analyze(t.name, parser.Nodes())
+
+	// 4. []node -> send to t.outNodes
+	go func() {
+		for node := range analyzer.Nodes() {
+			t.outNodes <- node
+		}
+		close(t.outNodes)
 		done <- true
 	}()
-
-	// 4. []node -> Translate to string -> []io.Reader
-	// io.Reader can also have errors.
-	go translator.Run()
 
 	// 3. []node -> Check semantic errors -> []node
 	go analyzer.Run()
@@ -179,10 +246,4 @@ func transpile(dst io.Writer, src io.Reader, srcpath string, translate func(*ana
 	go lexer.Run()
 
 	<-done
-
-	err = dstbuf.Flush()
-	if err != nil {
-		errs = append(errs, err)
-	}
-	return multierror.Append(nil, errs...).ErrorOrNil()
 }

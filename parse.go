@@ -5,20 +5,24 @@ import (
 	"fmt"
 )
 
-func parse(l *lexer) *parser {
+func parse(name string, inTokens <-chan token) *parser {
 	return &parser{
-		name:  l.name,
-		lexer: l,
-		nodes: make(chan node, 1),
+		name:     name,
+		inTokens: inTokens,
+		outNodes: make(chan node, 1),
 	}
 }
 
+func (p *parser) Nodes() <-chan node {
+	return p.outNodes
+}
+
 type parser struct {
-	name   string
-	lexer  *lexer
-	nodes  chan node
-	token  *token  // next() sets read token to this.
-	tokbuf []token // next() doesn't read from lexer.tokens if len(tokbuf) > 0 .
+	name     string
+	inTokens <-chan token
+	outNodes chan node
+	token    *token  // next() sets read token to this.
+	tokbuf   []token // next() doesn't read from inTokens if len(tokbuf) > 0 .
 }
 
 type node interface {
@@ -57,12 +61,12 @@ func (p *parser) Run() {
 		toplevel.Pos.offset = 0 // first read node's position is -1. adjust it
 		p.emit(toplevel)
 	}
-	close(p.nodes) // No more nodes will be delivered.
+	close(p.outNodes) // No more nodes will be delivered.
 }
 
 // emit passes an node back to the client.
 func (p *parser) emit(node node) {
-	p.nodes <- node
+	p.outNodes <- node
 }
 
 // errorf returns an error token and terminates the scan
@@ -86,7 +90,7 @@ func (p *parser) next() *token {
 		t = p.tokbuf[len(p.tokbuf)-1]
 		p.tokbuf = p.tokbuf[:len(p.tokbuf)-1]
 	} else {
-		t = <-p.lexer.tokens
+		t = <-p.inTokens
 	}
 	p.token = &t
 	return &t

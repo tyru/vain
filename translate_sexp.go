@@ -12,30 +12,30 @@ import (
 // TODO newline
 // TODO customize indent, newline
 
-func translateSexp(a *analyzer) translator {
-	return &sexpTranslator{a.name, a.nodes, make(chan io.Reader), "  "}
+func translateSexp(name string, inNodes <-chan node) translator {
+	return &sexpTranslator{name, inNodes, make(chan io.Reader), "  "}
 }
 
 type sexpTranslator struct {
-	name    string
-	nodes   <-chan node
-	readers chan io.Reader
-	indent  string
+	name       string
+	inNodes    <-chan node
+	outReaders chan io.Reader
+	indent     string
 }
 
 func (t *sexpTranslator) Run() {
-	for node := range t.nodes {
+	for node := range t.inNodes {
 		t.emit(t.toReader(node, 0))
 	}
-	close(t.readers)
+	close(t.outReaders)
 }
 
 func (t *sexpTranslator) Readers() <-chan io.Reader {
-	return t.readers
+	return t.outReaders
 }
 
 func (t *sexpTranslator) emit(r io.Reader) {
-	t.readers <- r
+	t.outReaders <- r
 }
 
 func (t *sexpTranslator) err(err error, node node) io.Reader {

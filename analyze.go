@@ -6,14 +6,18 @@ import (
 	"strconv"
 )
 
-func analyze(p *parser) *analyzer {
-	return &analyzer{p.name, p, make(chan node, 1)}
+func analyze(name string, inNodes <-chan node) *analyzer {
+	return &analyzer{name, inNodes, make(chan node, 1)}
+}
+
+func (a *analyzer) Nodes() <-chan node {
+	return a.outNodes
 }
 
 type analyzer struct {
-	name   string
-	parser *parser
-	nodes  chan node
+	name     string
+	inNodes  <-chan node
+	outNodes chan node
 }
 
 type typedNode struct {
@@ -27,7 +31,7 @@ func (node *typedNode) Node() node {
 }
 
 func (a *analyzer) Run() {
-	for node := range a.parser.nodes {
+	for node := range a.inNodes {
 		if top, ok := node.Node().(*topLevelNode); ok {
 			top, errs := a.analyze(top)
 			if len(errs) > 0 {
@@ -44,12 +48,12 @@ func (a *analyzer) Run() {
 			a.emit(a.err(err, node))
 		}
 	}
-	close(a.nodes)
+	close(a.outNodes)
 }
 
 // emit passes an node back to the client.
 func (a *analyzer) emit(n node) {
-	a.nodes <- n
+	a.outNodes <- n
 }
 
 func (a *analyzer) err(err error, n node) *errorNode {
@@ -91,9 +95,82 @@ func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
 // convertPre converts some specific nodes.
 // It also performs some semantic checks.
 func (a *analyzer) convertPre(top *topLevelNode) (*topLevelNode, []errorNode) {
-	errs := a.checkToplevelReturn(top)
+	errs := make([]errorNode, 0, 16)
+	checkers := newSeriesCheckers(
+		a.checkToplevelReturn,
+		a.checkUndeclaredVariables,
+		a.checkDuplicateVariables,
+	)
+
+	walkNodes(top, func(ctrl *walkCtrl, n node) node {
+		errs = append(errs, checkers.check(ctrl, n)...)
+		return n
+	})
+
 	top.body = a.convertVariableNames(top.body)
 	return top, errs
+}
+
+type checkFn func(*walkCtrl, node) []errorNode
+
+type seriesCheck struct {
+	checkers     []checkFn
+	ctrlList     []*walkCtrl
+	ignoredPaths [][][]int
+}
+
+func newSeriesCheckers(checkers ...checkFn) *seriesCheck {
+	ctrlList := make([]*walkCtrl, len(checkers))
+	ignoredPaths := make([][][]int, len(checkers))
+	for i := range checkers {
+		ctrlList[i] = newWalkCtrl()
+		ignoredPaths[i] = make([][]int, 0)
+	}
+	return &seriesCheck{checkers, ctrlList, ignoredPaths}
+}
+
+func (s *seriesCheck) isIgnored(route []int, paths [][]int) bool {
+	for i := range paths {
+		ignored := true
+		for j := range paths[i] {
+			if route[j] != paths[i][j] {
+				ignored = false
+				break
+			}
+		}
+		if ignored {
+			return true
+		}
+	}
+	return false
+}
+
+// check calls check functions for node.
+// If all of check functions called dontFollowInner(),
+// check also calls dontFollowInner() for parent *walkCtrl.
+func (s *seriesCheck) check(ctrl *walkCtrl, n node) []errorNode {
+	errs := make([]errorNode, 0, 8)
+	route := ctrl.route()
+	for i := range s.checkers {
+		if s.ctrlList[i].followInner && !s.isIgnored(route, s.ignoredPaths[i]) {
+			errs = append(errs, s.checkers[i](s.ctrlList[i], n)...)
+			if !s.ctrlList[i].followInner {
+				s.ignoredPaths[i] = append(s.ignoredPaths[i], route)
+				s.ctrlList[i].followInner = true
+			}
+		}
+	}
+
+	followInner := false
+	for i := range s.ctrlList {
+		if s.ctrlList[i].followInner {
+			followInner = true
+		}
+	}
+	if !followInner {
+		ctrl.dontFollowInner()
+	}
+	return errs
 }
 
 // convertPost converts *typedNode to node.
@@ -163,600 +240,262 @@ func (a *analyzer) infer(top *topLevelNode) (*typedNode, []errorNode) {
 
 // checkToplevelReturn checks if returnStatement exists under topLevelNode.
 // It doesn't check inside expression and function.
-func (a *analyzer) checkToplevelReturn(top *topLevelNode) []errorNode {
-	errNodes := make([]errorNode, 0, 8)
-	// Check inner nodes of if, while, for, try, ...
-	walkNodes(top, func(ctrl *walkCtrl, n node) node {
-		if n.IsExpr() {
-			ctrl.dontFollowInner()
-			return n
-		}
-		if _, ok := n.Node().(*funcStmtOrExpr); ok {
-			ctrl.dontFollowInner()
-			return n
-		}
-		if ret, ok := n.Node().(*returnStatement); ok {
-			errNodes = append(errNodes, *a.err(
-				errors.New("return statement found at top level"),
-				ret,
-			))
-		}
-		return n
-	})
-	return errNodes
+func (a *analyzer) checkToplevelReturn(ctrl *walkCtrl, n node) []errorNode {
+	if n.IsExpr() {
+		ctrl.dontFollowInner()
+		return nil
+	}
+	if _, ok := n.Node().(*funcStmtOrExpr); ok {
+		ctrl.dontFollowInner()
+		return nil
+	}
+	if ret, ok := n.Node().(*returnStatement); ok {
+		err := a.err(
+			errors.New("return statement found at top level"),
+			ret,
+		)
+		return []errorNode{*err}
+	}
+	return nil
+}
+
+// checkUndeclaredVariables checks if variables are used before declaration.
+func (a *analyzer) checkUndeclaredVariables(ctrl *walkCtrl, n node) []errorNode {
+	return nil // TODO
+}
+
+// checkDuplicateVariables checks if duplicate variable decralations exist.
+func (a *analyzer) checkDuplicateVariables(ctrl *walkCtrl, n node) []errorNode {
+	return nil // TODO
+}
+
+func newWalkCtrl() *walkCtrl {
+	return &walkCtrl{true, make([]int, 0, 16)}
 }
 
 type walkCtrl struct {
-	followInner    bool
-	followSiblings bool
+	followInner bool
+	routes      []int
 }
 
 func (ctrl *walkCtrl) dontFollowInner() {
 	ctrl.followInner = false
 }
 
-func (ctrl *walkCtrl) dontFollowSiblings() {
-	ctrl.followSiblings = false
+func (ctrl *walkCtrl) route() []int {
+	paths := make([]int, len(ctrl.routes))
+	copy(paths, ctrl.routes)
+	return paths
 }
 
 // walkNodes walks node recursively and call f with each node.
 // if f(node) == false, walk stops walking inner nodes.
 func walkNodes(n node, f func(*walkCtrl, node) node) node {
-	ctrl := &walkCtrl{true, true}
-	return doWalk(ctrl, n, f)
+	return newWalkCtrl().walk(n, 0, f)
 }
 
-func doWalk(ctrl *walkCtrl, n node, f func(*walkCtrl, node) node) node {
+func (ctrl *walkCtrl) push(id int) {
+	ctrl.routes = append(ctrl.routes, id)
+}
+
+func (ctrl *walkCtrl) pop() {
+	ctrl.routes = ctrl.routes[:len(ctrl.routes)-1]
+}
+
+func (ctrl *walkCtrl) walk(n node, id int, f func(*walkCtrl, node) node) node {
 	if n == nil {
 		return nil
 	}
+	ctrl.push(id)
 	r := f(ctrl, n)
 	if !ctrl.followInner {
+		ctrl.pop()
 		return r
 	}
+
 	switch nn := r.Node().(type) {
 	case *topLevelNode:
 		for i := range nn.body {
-			nn.body[i] = doWalk(ctrl, nn.body[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.body[i] = ctrl.walk(nn.body[i], i, f)
 		}
-		return r
 	case *importStatement:
-		return r
 	case *funcStmtOrExpr:
+		ctrl.push(0)
 		for i := range nn.args {
 			if nn.args[i].defaultVal != nil {
-				nn.args[i].defaultVal = doWalk(ctrl, nn.args[i].defaultVal, f)
-				if !ctrl.followSiblings {
-					ctrl.followSiblings = true
-					return r
-				}
+				nn.args[i].defaultVal = ctrl.walk(nn.args[i].defaultVal, i, f)
 			}
 		}
+		ctrl.pop()
+		ctrl.push(1)
 		for i := range nn.body {
-			nn.body[i] = doWalk(ctrl, nn.body[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.body[i] = ctrl.walk(nn.body[i], i, f)
 		}
-		return r
+		ctrl.pop()
 	case *returnStatement:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
 	case *ifStatement:
-		nn.cond = doWalk(ctrl, nn.cond, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
+		nn.cond = ctrl.walk(nn.cond, 0, f)
+		ctrl.push(1)
 		for i := range nn.body {
-			nn.body[i] = doWalk(ctrl, nn.body[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.body[i] = ctrl.walk(nn.body[i], i, f)
 		}
+		ctrl.pop()
+		ctrl.push(2)
 		for i := range nn.els {
-			nn.els[i] = doWalk(ctrl, nn.els[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.els[i] = ctrl.walk(nn.els[i], i, f)
 		}
-		return r
+		ctrl.pop()
 	case *whileStatement:
-		nn.cond = doWalk(ctrl, nn.cond, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
+		nn.cond = ctrl.walk(nn.cond, 0, f)
+		ctrl.push(1)
 		for i := range nn.body {
-			nn.body[i] = doWalk(ctrl, nn.body[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.body[i] = ctrl.walk(nn.body[i], i, f)
 		}
-		return r
+		ctrl.pop()
 	case *forStatement:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
+		ctrl.push(2)
 		for i := range nn.body {
-			nn.body[i] = doWalk(ctrl, nn.body[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.body[i] = ctrl.walk(nn.body[i], i, f)
 		}
-		return r
+		ctrl.pop()
 	case *ternaryNode:
-		nn.cond = doWalk(ctrl, nn.cond, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.cond = ctrl.walk(nn.cond, 0, f)
+		nn.left = ctrl.walk(nn.left, 1, f)
+		nn.right = ctrl.walk(nn.right, 2, f)
 	case *orNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *andNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *equalNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *equalCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *nequalNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *nequalCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *greaterNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *greaterCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *gequalNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *gequalCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *smallerNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *smallerCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *sequalNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *sequalCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *matchNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *matchCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *noMatchNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *noMatchCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *isNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *isCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *isNotNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *isNotCiNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *addNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *subtractNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *multiplyNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *divideNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *remainderNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *notNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
 	case *minusNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
 	case *plusNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
 	case *sliceNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
+		nn.left = ctrl.walk(nn.left, 0, f)
+		ctrl.push(1)
 		for i := range nn.rlist {
-			nn.rlist[i] = doWalk(ctrl, nn.rlist[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.rlist[i] = ctrl.walk(nn.rlist[i], i, f)
 		}
-		return r
+		ctrl.pop()
 	case *callNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
+		nn.left = ctrl.walk(nn.left, 0, f)
+		ctrl.push(1)
 		for i := range nn.rlist {
-			nn.rlist[i] = doWalk(ctrl, nn.rlist[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.rlist[i] = ctrl.walk(nn.rlist[i], i, f)
 		}
-		return r
+		ctrl.pop()
 	case *subscriptNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *dotNode:
-		nn.left = doWalk(ctrl, nn.left, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		nn.right = doWalk(ctrl, nn.right, f)
-		if !ctrl.followSiblings {
-			ctrl.followSiblings = true
-			return r
-		}
-		return r
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *identifierNode:
-		return r
 	case *intNode:
-		return r
 	case *floatNode:
-		return r
 	case *stringNode:
-		return r
 	case *listNode:
 		for i := range nn.value {
-			nn.value[i] = doWalk(ctrl, nn.value[i], f)
-			if !ctrl.followSiblings {
-				ctrl.followSiblings = true
-				return r
-			}
+			nn.value[i] = ctrl.walk(nn.value[i], i, f)
 		}
-		return r
 	case *dictionaryNode:
 		for i := range nn.value {
+			ctrl.push(i)
 			val := nn.value[i]
 			for j := range val {
 				if val[j] != nil {
-					val[j] = doWalk(ctrl, val[j], f)
-					if !ctrl.followSiblings {
-						ctrl.followSiblings = true
-						return r
-					}
+					val[j] = ctrl.walk(val[j], j, f)
 				}
 			}
+			ctrl.pop()
 		}
-		return r
 	case *optionNode:
-		return r
 	case *envNode:
-		return r
 	case *regNode:
-		return r
-	default:
-		return r
 	}
+
+	ctrl.pop()
+	return r
 }

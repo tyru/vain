@@ -271,6 +271,10 @@ func lex(name, input string) *lexer {
 	}
 }
 
+func (l *lexer) Tokens() <-chan token {
+	return l.tokens
+}
+
 // Run lexes the input by executing state functions until
 // the state is nil.
 func (l *lexer) Run() {

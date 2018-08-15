@@ -8,21 +8,21 @@ import (
 	"strings"
 )
 
-func translateVim(a *analyzer) translator {
-	return &vimTranslator{a.name, a.nodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
+func translateVim(name string, inNodes <-chan node) translator {
+	return &vimTranslator{name, inNodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
 }
 
 type vimTranslator struct {
 	name           string
-	nodes          <-chan node
-	readers        chan io.Reader
+	inNodes        <-chan node
+	outReaders     chan io.Reader
 	indentStr      string
 	level          int
 	namedExprFuncs []io.Reader
 }
 
 func (t *vimTranslator) Run() {
-	for node := range t.nodes {
+	for node := range t.inNodes {
 		toplevel := t.toReader(node, node)
 		t.emit(strings.NewReader("scriptencoding utf-8\n"))
 		if len(t.namedExprFuncs) > 0 {
@@ -38,15 +38,15 @@ func (t *vimTranslator) Run() {
 		}
 		t.emit(toplevel)
 	}
-	close(t.readers)
+	close(t.outReaders)
 }
 
 func (t *vimTranslator) Readers() <-chan io.Reader {
-	return t.readers
+	return t.outReaders
 }
 
 func (t *vimTranslator) emit(r io.Reader) {
-	t.readers <- r
+	t.outReaders <- r
 }
 
 func (t *vimTranslator) err(err error, node node) io.Reader {
