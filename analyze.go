@@ -9,18 +9,54 @@ import (
 )
 
 func analyze(name string, inNodes <-chan node.Node) *analyzer {
-	return &analyzer{name, inNodes, make(chan node.Node, 1)}
-}
-
-func (a *analyzer) Nodes() <-chan node.Node {
-	return a.outNodes
+	return &analyzer{name, inNodes, make(chan node.Node, 1), defaultPolicies}
 }
 
 type analyzer struct {
 	name     string
 	inNodes  <-chan node.Node
 	outNodes chan node.Node
+	policies map[string]bool
 }
+
+func (a *analyzer) Nodes() <-chan node.Node {
+	return a.outNodes
+}
+
+func init() {
+	def := []struct {
+		name    string
+		check   checkFn
+		enabled bool
+	}{
+		{
+			"toplevel-return",
+			checkToplevelReturn,
+			true,
+		},
+		{
+			"undeclared-variables",
+			checkUndeclaredVariables,
+			true,
+		},
+		{
+			"duplicate-variables",
+			checkDuplicateVariables,
+			true,
+		},
+	}
+	defaultPolicies = make(map[string]bool, len(def))
+	ruleChecker = make(map[string]checkFn, len(def))
+	for i := range def {
+		defaultPolicies[def[i].name] = def[i].enabled
+		ruleChecker[def[i].name] = def[i].check
+	}
+}
+
+type checkFn func(*analyzer, *walkCtrl, node.Node) []node.ErrorNode
+
+var defaultPolicies map[string]bool
+var ruleChecker map[string]checkFn
 
 type typedNode struct {
 	node.Node
@@ -104,14 +140,16 @@ func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {
 // check checks the semantic errors.
 func (a *analyzer) check(top node.Node) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 16)
-	checkers := newSeriesCheckers(
-		a.checkToplevelReturn,
-		a.checkUndeclaredVariables,
-		a.checkDuplicateVariables,
-	)
+	checkers := make([]checkFn, 0, len(ruleChecker))
+	for name, checker := range ruleChecker {
+		if a.policies[name] {
+			checkers = append(checkers, checker)
+		}
+	}
+	checker := newSeriesChecker(checkers...)
 
 	walkNodes(top, func(ctrl *walkCtrl, n node.Node) node.Node {
-		errs = append(errs, checkers.check(ctrl, n)...)
+		errs = append(errs, checker.check(a, ctrl, n)...)
 		return n
 	})
 
@@ -125,15 +163,13 @@ func (a *analyzer) convertPre(n node.Node) {
 	}
 }
 
-type checkFn func(*walkCtrl, node.Node) []node.ErrorNode
-
 type seriesCheck struct {
 	checkers     []checkFn
 	ctrlList     []*walkCtrl
 	ignoredPaths [][][]int
 }
 
-func newSeriesCheckers(checkers ...checkFn) *seriesCheck {
+func newSeriesChecker(checkers ...checkFn) *seriesCheck {
 	ctrlList := make([]*walkCtrl, len(checkers))
 	ignoredPaths := make([][][]int, len(checkers))
 	for i := range checkers {
@@ -162,12 +198,12 @@ func (s *seriesCheck) isIgnored(route []int, paths [][]int) bool {
 // check calls check functions for node.
 // If all of check functions called dontFollowInner(),
 // check also calls dontFollowInner() for parent *walkCtrl.
-func (s *seriesCheck) check(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+func (s *seriesCheck) check(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 8)
 	route := ctrl.route()
 	for i := range s.checkers {
 		if s.ctrlList[i].followInner && !s.isIgnored(route, s.ignoredPaths[i]) {
-			errs = append(errs, s.checkers[i](s.ctrlList[i], n)...)
+			errs = append(errs, s.checkers[i](a, s.ctrlList[i], n)...)
 			if !s.ctrlList[i].followInner {
 				s.ignoredPaths[i] = append(s.ignoredPaths[i], route)
 				s.ctrlList[i].followInner = true
@@ -254,7 +290,7 @@ func (a *analyzer) infer(top node.Node) (*typedNode, []node.ErrorNode) {
 
 // checkToplevelReturn checks if returnStatement exists under topLevelNode.
 // It doesn't check inside expression and function.
-func (a *analyzer) checkToplevelReturn(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	if n.IsExpr() {
 		ctrl.dontFollowInner()
 		return nil
@@ -274,12 +310,12 @@ func (a *analyzer) checkToplevelReturn(ctrl *walkCtrl, n node.Node) []node.Error
 }
 
 // checkUndeclaredVariables checks if variables are used before declaration.
-func (a *analyzer) checkUndeclaredVariables(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+func checkUndeclaredVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	return nil // TODO
 }
 
 // checkDuplicateVariables checks if duplicate variable decralations exist.
-func (a *analyzer) checkDuplicateVariables(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+func checkDuplicateVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	return nil // TODO
 }
 
