@@ -149,7 +149,7 @@ func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {
 // check checks the semantic errors.
 func (a *analyzer) check(tNode *typedNode) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 16)
-	walkNodes(tNode, func(ctrl *walkCtrl, n node.Node) node.Node {
+	walkNode(tNode, func(ctrl *walkCtrl, n node.Node) node.Node {
 		tNode := n.(*typedNode) // NOTE: Given node must be *typedNode.
 		errs = append(errs, a.checker.check(a, ctrl, tNode)...)
 		return n
@@ -206,7 +206,7 @@ func (a *analyzer) convertVariableNames(body []node.Node) []node.Node {
 	nr := 0
 	newbody := make([]node.Node, 0, len(body))
 	for i := range body {
-		b := walkNodes(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
+		b := walkNode(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
 			if f, ok := n.TerminalNode().(*funcStmtOrExpr); ok {
 				f.body = a.convertVariableNames(f.body)
 				ctrl.dontFollowInner()
@@ -251,7 +251,7 @@ func (a *analyzer) convertVariableNames(body []node.Node) []node.Node {
 
 // infer infers each node's type and return the tree of *typedNode.
 func (a *analyzer) infer(top node.Node) (*typedNode, []node.ErrorNode) {
-	typedTop := walkNodes(top, func(_ *walkCtrl, n node.Node) node.Node {
+	typedTop := walkNode(top, func(_ *walkCtrl, n node.Node) node.Node {
 		return &typedNode{n, ""} // TODO
 	}).(*typedNode) // returned node must be *topLevelNode
 	return typedTop, nil
@@ -259,34 +259,41 @@ func (a *analyzer) infer(top node.Node) (*typedNode, []node.ErrorNode) {
 
 // convertPost converts *typedNode to node.
 func (a *analyzer) convertPost(tNode *typedNode) node.Node {
-	return walkNodes(tNode, func(_ *walkCtrl, n node.Node) node.Node {
+	return walkNode(tNode, func(_ *walkCtrl, n node.Node) node.Node {
 		// Unwrap node from typedNode.
 		return n.TerminalNode()
 	})
 }
 
+// newWalkCtrl is the constructor for walkCtrl.
 func newWalkCtrl() *walkCtrl {
 	return &walkCtrl{true, make([]int, 0, 16)}
 }
 
+// walkCtrl is passed to callback.
+// Callback can control walking flow by calling its methods.
 type walkCtrl struct {
 	followInner bool
 	routes      []int
 }
 
+// dontFollowInner controls walking flow.
+// When it is called, all inner nodes are skipped.
 func (ctrl *walkCtrl) dontFollowInner() {
 	ctrl.followInner = false
 }
 
+// route returns the route of current node.
+// Note that route may become wrong if node structure is changed.
+// Because this is indices of each node.
 func (ctrl *walkCtrl) route() []int {
 	paths := make([]int, len(ctrl.routes))
 	copy(paths, ctrl.routes)
 	return paths
 }
 
-// walkNodes walks node recursively and call f with each node.
-// if f(node) == false, walk stops walking inner nodes.
-func walkNodes(n node.Node, f func(*walkCtrl, node.Node) node.Node) node.Node {
+// walkNode is newWalkCtrl().walk(n, 0, f)
+func walkNode(n node.Node, f func(*walkCtrl, node.Node) node.Node) node.Node {
 	return newWalkCtrl().walk(n, 0, f)
 }
 
@@ -298,6 +305,8 @@ func (ctrl *walkCtrl) pop() {
 	ctrl.routes = ctrl.routes[:len(ctrl.routes)-1]
 }
 
+// walk walks node recursively and call f with each node.
+// if f(node) == false, walk stops walking inner nodes.
 func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) node.Node) node.Node {
 	if n == nil {
 		return nil
