@@ -92,72 +92,110 @@ func build(args []string) error {
 	return multierror.Append(nil, errs...).ErrorOrNil()
 }
 
+func collectTargetFiles(args []string, files chan<- string) error {
+	if len(args) > 0 {
+		// If arguments were given, pass them as filenames.
+		for i := range args {
+			if _, err := os.Stat(args[i]); os.IsNotExist(err) {
+				return err
+			}
+		}
+		for i := range args {
+			files <- args[i]
+		}
+		return nil
+	}
+	// Otherwise, collect .vain files under current directory.
+	return filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasSuffix(strings.ToLower(path), ".vain") {
+			files <- path
+		}
+		return nil
+	})
+}
+
 func genFiles(name string) error {
 	src, err := os.Open(name)
 	if err != nil {
 		return err
 	}
-	defer src.Close()
 
 	var content strings.Builder
 	_, err = io.Copy(&content, src)
+	src.Close()
 	if err != nil {
 		return err
 	}
 
-	sexpCh := make(chan node.Node, 1)
-	vimCh := make(chan node.Node, 1)
+	dumpCh := make(chan node.Node, 1)
+	analyzeCh := make(chan node.Node, 1)
 
-	transpiler := transpile(name, content.String())
-	sexpTranslator := translateSexp(name, sexpCh)
-	vimTranslator := translateVim(name, vimCh)
+	lexer := lex(name, content.String())
+	parser := parse(name, lexer.Tokens())
+	dumper := dump(name, dumpCh)
+	analyzer := analyze(name, analyzeCh)
+	translator := translate(name, analyzer.Nodes())
+
 	vastFile := name[:len(name)-len(".vain")] + ".vast"
 	vimFile := name[:len(name)-len(".vain")] + ".vim"
 	writeErr := make(chan error, 2)
 	var wg sync.WaitGroup
 
-	// 4. []io.Reader -> file.vast
+	// 7. []io.Reader -> Write to file.vim
 	wg.Add(1)
 	go func() {
-		writeErr <- writeReaders(sexpTranslator.Readers(), vastFile)
+		writeErr <- writeReaders(translator.Readers(), vimFile)
 		wg.Done()
 	}()
 
-	// 4. []io.Reader -> file.vim
+	// 6. []jsonExpr -> Translate to vim script -> []io.Reader
+	go translator.Run()
+
+	// 5. []node.Node -> Check semantic errors, emit intermediate code -> []jsonExpr
+	go analyzer.Run()
+
+	// 4.1. []io.Reader -> Write to file.vast
 	wg.Add(1)
 	go func() {
-		writeErr <- writeReaders(vimTranslator.Readers(), vimFile)
+		writeErr <- writeReaders(dumper.Readers(), vastFile)
 		wg.Done()
 	}()
 
-	// 3. []node.Node -> []io.Reader
-	// io.Reader can also have errors.
-	go sexpTranslator.Run()
-	go vimTranslator.Run()
+	// 4. []node.Node -> Dump AST -> []io.Reader
+	go dumper.Run()
 
-	// 2. []node.Node -> sexpTranslator, vimTranslator
+	// 3. []node.Node -> 4. dumper, 5. analyzer
 	go func() {
-		for node := range transpiler.Nodes() {
-			sexpCh <- node
-			vimCh <- node
+		for node := range parser.Nodes() {
+			dumpCh <- node
+			analyzeCh <- node
 		}
-		close(sexpCh)
-		close(vimCh)
+		close(dumpCh)
+		close(analyzeCh)
 	}()
 
-	// 1. source code -> []node.Node
-	go transpiler.Run()
+	// 2. []token -> Parse -> []node.Node
+	go parser.Run()
+
+	// 1. source code -> Lex -> []token
+	go lexer.Run()
 
 	wg.Wait()
 	close(writeErr)
+	errs := make([]error, 0, 2)
 	for err := range writeErr {
 		if err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return multierror.Append(nil, errs...).ErrorOrNil()
 }
 
+// Write given readers to temporary file with a buffer.
+// And after successful write, rename to dst.
 func writeReaders(readers <-chan io.Reader, dst string) error {
 	tmpfile, err := ioutil.TempFile("", "vainsrc")
 	if err != nil {
@@ -182,31 +220,6 @@ func writeReaders(readers <-chan io.Reader, dst string) error {
 	}
 	tmpfile.Close()
 	return os.Rename(tmpfile.Name(), dst)
-}
-
-func collectTargetFiles(args []string, files chan<- string) error {
-	if len(args) > 0 {
-		// If arguments were given, pass them as filenames.
-		for i := range args {
-			if _, err := os.Stat(args[i]); os.IsNotExist(err) {
-				return err
-			}
-		}
-		for i := range args {
-			files <- args[i]
-		}
-		return nil
-	}
-	// Otherwise, collect .vain files under current directory.
-	return filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if strings.HasSuffix(strings.ToLower(path), ".vain") {
-			files <- path
-		}
-		return nil
-	})
 }
 
 func transpile(name, input string) *transpiler {
