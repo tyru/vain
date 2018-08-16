@@ -43,11 +43,11 @@ func (d *dumper) emit(r io.Reader) {
 func (d *dumper) err(err error, n node.Node) io.Reader {
 	if pos := n.Position(); pos != nil {
 		return &errorReader{
-			fmt.Errorf("[translate/sexp] %s:%d:%d: "+err.Error(), d.name, pos.Line(), pos.Col()+1),
+			fmt.Errorf("[dump] %s:%d:%d: "+err.Error(), d.name, pos.Line(), pos.Col()+1),
 		}
 	}
 	return &errorReader{
-		fmt.Errorf("[translate/sexp] %s: "+err.Error(), d.name),
+		fmt.Errorf("[dump] %s: "+err.Error(), d.name),
 	}
 }
 

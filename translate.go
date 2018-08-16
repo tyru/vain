@@ -54,11 +54,11 @@ func (t *translator) emit(r io.Reader) {
 func (t *translator) err(err error, n node.Node) io.Reader {
 	if pos := n.Position(); pos != nil {
 		return &errorReader{
-			fmt.Errorf("[translate/vim] %s:%d:%d: "+err.Error(), t.name, pos.Line(), pos.Col()+1),
+			fmt.Errorf("[translate] %s:%d:%d: "+err.Error(), t.name, pos.Line(), pos.Col()+1),
 		}
 	}
 	return &errorReader{
-		fmt.Errorf("[translate/vim] %s: "+err.Error(), t.name),
+		fmt.Errorf("[translate] %s: "+err.Error(), t.name),
 	}
 }
 
