@@ -89,6 +89,8 @@ func (t *translator) toReader(node, parent node.Node) io.Reader {
 		return t.newReturnNodeReader(n, parent)
 	case *constStatement:
 		return t.newConstStatementReader(n, parent)
+	case *letStatement:
+		return t.newLetStatementReader(n, parent)
 	case *ifStatement:
 		return t.newIfStatementReader(n, parent, true)
 	case *whileStatement:
@@ -503,6 +505,38 @@ func (t *translator) newConstStatementReader(node *constStatement, parent node.N
 	}
 	s := fmt.Sprintf("let %s = %s", left.String(), right.String())
 	return strings.NewReader(s)
+}
+
+func (t *translator) newLetStatementReader(node *letStatement, parent node.Node) io.Reader {
+	if node.right == nil {
+		return emptyReader // TODO
+	}
+	var buf bytes.Buffer
+	buf.WriteString("let ")
+	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
+		buf.WriteString("[")
+		for i := range list.value {
+			if i > 0 {
+				buf.WriteString(",")
+			}
+			_, err := io.Copy(&buf, t.toReader(list.value[i], parent))
+			if err != nil {
+				return t.err(err, list.value[i])
+			}
+		}
+		buf.WriteString("]")
+	} else {
+		_, err := io.Copy(&buf, t.toReader(node.left, parent))
+		if err != nil {
+			return t.err(err, node.left)
+		}
+	}
+	buf.WriteString(" = ")
+	_, err := io.Copy(&buf, t.toReader(node.right, parent))
+	if err != nil {
+		return t.err(err, node.right)
+	}
+	return strings.NewReader(buf.String())
 }
 
 func (t *translator) newTernaryNodeReader(node *ternaryNode, parent node.Node) io.Reader {

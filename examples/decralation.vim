@@ -1,5 +1,7 @@
 scriptencoding utf-8
 let foo = 42
+let bar = 1
+
 let [foo,_unused0,baz] = [1,2,3]
 let [foo,_unused1,_unused2,baz] = [1,2,3,4]
 let [foo,_unused3,baz,_unused4] = [1,2,3,4]

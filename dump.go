@@ -70,6 +70,8 @@ func (d *dumper) toReader(node node.Node, level int) io.Reader {
 		return d.newReturnNodeReader(n, level)
 	case *constStatement:
 		return d.newConstStatementReader(n, level)
+	case *letStatement:
+		return d.newLetStatementReader(n, level)
 	case *ifStatement:
 		return d.newIfStatementReader(n, level)
 	case *whileStatement:
@@ -299,6 +301,38 @@ func (d *dumper) newConstStatementReader(node *constStatement, level int) io.Rea
 	}
 	s := fmt.Sprintf("(const %s %s)", left.String(), right.String())
 	return strings.NewReader(s)
+}
+
+func (d *dumper) newLetStatementReader(node *letStatement, level int) io.Reader {
+	var buf bytes.Buffer
+	buf.WriteString("(let ")
+	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
+		buf.WriteString("(")
+		for i := range list.value {
+			if i > 0 {
+				buf.WriteString(" ")
+			}
+			_, err := io.Copy(&buf, d.toReader(list.value[i], level))
+			if err != nil {
+				return d.err(err, list.value[i])
+			}
+		}
+		buf.WriteString(")")
+	} else {
+		_, err := io.Copy(&buf, d.toReader(node.left, level))
+		if err != nil {
+			return d.err(err, node.left)
+		}
+	}
+	if node.right != nil {
+		buf.WriteString(" ")
+		_, err := io.Copy(&buf, d.toReader(node.right, level))
+		if err != nil {
+			return d.err(err, node.right)
+		}
+	}
+	buf.WriteString(")")
+	return strings.NewReader(buf.String())
 }
 
 func (d *dumper) newIfStatementReader(node *ifStatement, level int) io.Reader {

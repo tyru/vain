@@ -1,4 +1,7 @@
 const foo = 42
+let bar = 1
+let baz
+
 const [foo, _, baz] = [1,2,3]
 const [foo, _, _, baz] = [1,2,3,4]
 const [foo, _, baz, _] = [1,2,3,4]

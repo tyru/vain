@@ -220,6 +220,10 @@ func (p *parser) acceptStmtOrExpr() (node.Node, bool) {
 		p.backup(p.token)
 		return p.acceptConstStatement()
 	}
+	if p.accept(tokenLet) {
+		p.backup(p.token)
+		return p.acceptLetStatement()
+	}
 	if p.accept(tokenReturn) {
 		p.backup(p.token)
 		return p.acceptReturnStatement()
@@ -345,6 +349,67 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *node.Pos, bool)
 	return ids, hasUnderscore, pos, true
 }
 
+type letStatement struct {
+	left          node.Node
+	right         expr
+	hasUnderscore bool
+}
+
+// Clone clones itself.
+func (n *letStatement) Clone() node.Node {
+	var right node.Node
+	if n.right != nil {
+		right = n.right.Clone()
+	}
+	return &letStatement{n.left.Clone(), right, n.hasUnderscore}
+}
+
+func (n *letStatement) TerminalNode() node.Node {
+	return n
+}
+
+func (n *letStatement) Position() *node.Pos {
+	return nil
+}
+
+func (n *letStatement) IsExpr() bool {
+	return false
+}
+
+// letStatement := "let" assignLhs ( LF | "=" expr )
+// And if tokenCClose is detected instead of expr,
+// it must be only decralation (no expr) inside block.
+func (p *parser) acceptLetStatement() (*node.PosNode, bool) {
+	if !p.accept(tokenLet) {
+		p.errorf("expected %s but got %s", tokenName(tokenLet), tokenName(p.peek().typ))
+		return nil, false
+	}
+	pos := p.token.pos
+	left, hasUnderscore, ok := p.acceptAssignLHS()
+	if !ok {
+		return nil, false
+	}
+	if p.accept(tokenNewline) {
+		n := node.NewPosNode(pos, &letStatement{left, nil, hasUnderscore})
+		return n, true
+	}
+	if p.accept(tokenCClose) { // end of block
+		p.backup(p.token)
+		n := node.NewPosNode(pos, &letStatement{left, nil, hasUnderscore})
+		return n, true
+	}
+	if !p.accept(tokenEqual) {
+		p.errorf("expected %s but got %s", tokenName(tokenEqual), tokenName(p.peek().typ))
+		return nil, false
+	}
+	right, ok := p.acceptExpr()
+	if !ok {
+		return nil, false
+	}
+	n := node.NewPosNode(pos, &letStatement{left, right, hasUnderscore})
+	return n, true
+}
+
 type returnStatement struct {
 	left expr
 }
@@ -370,7 +435,7 @@ func (n *returnStatement) IsExpr() bool {
 }
 
 // returnStatement := "return" ( expr | LF )
-// and if tokenCClose is detected instead of expr,
+// And if tokenCClose is detected instead of expr,
 // it must be empty return statement inside block.
 func (p *parser) acceptReturnStatement() (node.Node, bool) {
 	if !p.accept(tokenReturn) {
