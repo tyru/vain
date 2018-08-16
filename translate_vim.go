@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tyru/vain/node"
 )
 
-func translateVim(name string, inNodes <-chan node) translator {
+func translateVim(name string, inNodes <-chan node.Node) translator {
 	return &vimTranslator{name, inNodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
 }
 
 type vimTranslator struct {
 	name           string
-	inNodes        <-chan node
+	inNodes        <-chan node.Node
 	outReaders     chan io.Reader
 	indentStr      string
 	level          int
@@ -49,10 +51,14 @@ func (t *vimTranslator) emit(r io.Reader) {
 	t.outReaders <- r
 }
 
-func (t *vimTranslator) err(err error, node node) io.Reader {
-	pos := node.Position()
+func (t *vimTranslator) err(err error, n node.Node) io.Reader {
+	if pos := n.Position(); pos != nil {
+		return &errorReader{
+			fmt.Errorf("[translate/vim] %s:%d:%d: "+err.Error(), t.name, pos.Line, pos.Col+1),
+		}
+	}
 	return &errorReader{
-		fmt.Errorf("[translate/vim] %s:%d:%d: "+err.Error(), t.name, pos.line, pos.col+1),
+		fmt.Errorf("[translate/vim] %s: "+err.Error(), t.name),
 	}
 }
 
@@ -68,11 +74,11 @@ func (t *vimTranslator) indent() string {
 	return strings.Repeat(t.indentStr, t.level)
 }
 
-func (t *vimTranslator) toReader(node, parent node) io.Reader {
+func (t *vimTranslator) toReader(node, parent node.Node) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
-	switch n := node.Node().(type) {
-	case *errorNode:
-		return &errorReader{n.err}
+	switch n := node.TerminalNode().(type) {
+	case error:
+		return &errorReader{n}
 	case *topLevelNode:
 		return t.newTopLevelNodeReader(n)
 	case *importStatement:
@@ -199,12 +205,12 @@ func (t *vimTranslator) newTopLevelNodeReader(node *topLevelNode) io.Reader {
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newImportStatementReader(stmt *importStatement, parent node) io.Reader {
+func (t *vimTranslator) newImportStatementReader(stmt *importStatement, parent node.Node) io.Reader {
 	// TODO
 	return strings.NewReader("")
 }
 
-func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node) io.Reader {
+func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node.Node) io.Reader {
 	if !f.IsExpr() {
 		// Function statement is required.
 		if f.name != "" {
@@ -232,7 +238,7 @@ func (t *vimTranslator) newFuncReader(f *funcStmtOrExpr, parent node) io.Reader 
 	return t.newLambdaReader(f, parent)
 }
 
-func (t *vimTranslator) isVoidExprFunc(f *funcStmtOrExpr, parent node) bool {
+func (t *vimTranslator) isVoidExprFunc(f *funcStmtOrExpr, parent node.Node) bool {
 	if !f.IsExpr() {
 		// Function statement is required.
 		if f.name != "" {
@@ -294,7 +300,7 @@ func (t *vimTranslator) newFuncStmtReader(f *funcStmtOrExpr) io.Reader {
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newLambdaReader(f *funcStmtOrExpr, parent node) io.Reader {
+func (t *vimTranslator) newLambdaReader(f *funcStmtOrExpr, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("{")
 	for i := range f.args {
@@ -335,7 +341,7 @@ func (t *vimTranslator) convertModifiers(mods []string) (autoload, global bool, 
 	return
 }
 
-func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, top bool) io.Reader {
+func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node.Node, top bool) io.Reader {
 	var cond bytes.Buffer
 	_, err := io.Copy(&cond, t.toReader(node.cond, node))
 	if err != nil {
@@ -392,7 +398,7 @@ func (t *vimTranslator) newIfStatementReader(node *ifStatement, parent node, top
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newWhileStatementReader(node *whileStatement, parent node) io.Reader {
+func (t *vimTranslator) newWhileStatementReader(node *whileStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("while ")
 	_, err := io.Copy(&buf, t.toReader(node.cond, node))
@@ -415,10 +421,10 @@ func (t *vimTranslator) newWhileStatementReader(node *whileStatement, parent nod
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newForStatementReader(node *forStatement, parent node) io.Reader {
+func (t *vimTranslator) newForStatementReader(node *forStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("for ")
-	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
+	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
 		buf.WriteString("[")
 		for i := range list.value {
 			if i > 0 {
@@ -457,7 +463,7 @@ func (t *vimTranslator) newForStatementReader(node *forStatement, parent node) i
 	return strings.NewReader(buf.String())
 }
 
-func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node) io.Reader {
+func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node.Node) io.Reader {
 	if node.left == nil {
 		return strings.NewReader("return")
 	}
@@ -470,9 +476,9 @@ func (t *vimTranslator) newReturnNodeReader(node *returnStatement, parent node) 
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newConstStatementReader(node *constStatement, parent node) io.Reader {
+func (t *vimTranslator) newConstStatementReader(node *constStatement, parent node.Node) io.Reader {
 	var left bytes.Buffer
-	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
+	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
 		left.WriteString("[")
 		for i := range list.value {
 			if i > 0 {
@@ -499,7 +505,7 @@ func (t *vimTranslator) newConstStatementReader(node *constStatement, parent nod
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node) io.Reader {
+func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node.Node) io.Reader {
 	var cond bytes.Buffer
 	_, err := io.Copy(&cond, t.toReader(node.cond, parent))
 	if err != nil {
@@ -522,7 +528,7 @@ func (t *vimTranslator) newTernaryNodeReader(node *ternaryNode, parent node) io.
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node, opstr string) io.Reader {
+func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node.Node, opstr string) io.Reader {
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.Left(), parent))
 	if err != nil {
@@ -540,7 +546,7 @@ func (t *vimTranslator) newBinaryOpNodeReader(node binaryOpNode, parent node, op
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node, opstr string) io.Reader {
+func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node.Node, opstr string) io.Reader {
 	var value bytes.Buffer
 	_, err := io.Copy(&value, t.toReader(node.Value(), parent))
 	if err != nil {
@@ -550,7 +556,7 @@ func (t *vimTranslator) newUnaryOpNodeReader(node unaryOpNode, parent node, opst
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node) io.Reader {
+func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node.Node) io.Reader {
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
@@ -581,7 +587,7 @@ func (t *vimTranslator) newSliceNodeReader(node *sliceNode, parent node) io.Read
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newCallNodeReader(node *callNode, parent node) io.Reader {
+func (t *vimTranslator) newCallNodeReader(node *callNode, parent node.Node) io.Reader {
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
@@ -600,7 +606,7 @@ func (t *vimTranslator) newCallNodeReader(node *callNode, parent node) io.Reader
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node) io.Reader {
+func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node.Node) io.Reader {
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
@@ -615,7 +621,7 @@ func (t *vimTranslator) newSubscriptNodeReader(node *subscriptNode, parent node)
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node) io.Reader {
+func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node.Node) io.Reader {
 	var left bytes.Buffer
 	_, err := io.Copy(&left, t.toReader(node.left, parent))
 	if err != nil {
@@ -632,27 +638,27 @@ func (t *vimTranslator) newDotNodeReader(node *dotNode, parent node) io.Reader {
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newIdentifierNodeReader(node *identifierNode, parent node) io.Reader {
+func (t *vimTranslator) newIdentifierNodeReader(node *identifierNode, parent node.Node) io.Reader {
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newIntNodeReader(node *intNode, parent node) io.Reader {
+func (t *vimTranslator) newIntNodeReader(node *intNode, parent node.Node) io.Reader {
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newFloatNodeReader(node *floatNode, parent node) io.Reader {
+func (t *vimTranslator) newFloatNodeReader(node *floatNode, parent node.Node) io.Reader {
 	return strings.NewReader(node.value)
 }
 
-func (t *vimTranslator) newStringNodeReader(node *stringNode, parent node) io.Reader {
+func (t *vimTranslator) newStringNodeReader(node *stringNode, parent node.Node) io.Reader {
 	return strings.NewReader(string(node.value))
 }
 
-func (t *vimTranslator) newLiteralNodeReader(node literalNode, parent node, opstr string) io.Reader {
+func (t *vimTranslator) newLiteralNodeReader(node literalNode, parent node.Node, opstr string) io.Reader {
 	return strings.NewReader(opstr + node.Value())
 }
 
-func (t *vimTranslator) newListNodeReader(node *listNode, parent node) io.Reader {
+func (t *vimTranslator) newListNodeReader(node *listNode, parent node.Node) io.Reader {
 	args := make([]string, 0, len(node.value))
 	for i := range node.value {
 		var arg bytes.Buffer
@@ -666,7 +672,7 @@ func (t *vimTranslator) newListNodeReader(node *listNode, parent node) io.Reader
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent node) io.Reader {
+func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent node.Node) io.Reader {
 	args := make([]string, 0, len(node.value))
 	for i := range node.value {
 		var key bytes.Buffer
@@ -695,7 +701,7 @@ func (t *vimTranslator) newDictionaryNodeReader(node *dictionaryNode, parent nod
 	return strings.NewReader(s)
 }
 
-func (t *vimTranslator) newCommentNodeReader(node *commentNode, parent node) io.Reader {
+func (t *vimTranslator) newCommentNodeReader(node *commentNode, parent node.Node) io.Reader {
 	// return strings.NewReader("\"" + node.value[1:])
 	return emptyReader
 }
@@ -713,7 +719,7 @@ func (t *vimTranslator) toJSONString(vs *vainString) (string, error) {
 }
 
 // paren returns string wrapped by "(", ")" if needsParen(node) == true.
-func (t *vimTranslator) paren(s string, node node) string {
+func (t *vimTranslator) paren(s string, node node.Node) string {
 	if t.needsParen(node) {
 		return "(" + s + ")"
 	}
@@ -721,7 +727,7 @@ func (t *vimTranslator) paren(s string, node node) string {
 }
 
 // needsParen returns true if node should be wrapped by parentheses.
-func (t *vimTranslator) needsParen(node node) bool {
+func (t *vimTranslator) needsParen(node node.Node) bool {
 	switch node.(type) {
 	case *topLevelNode:
 		return false
@@ -825,7 +831,7 @@ func (t *vimTranslator) needsParen(node node) bool {
 	return true
 }
 
-func (t *vimTranslator) toExcmd(n, parent node) io.Reader {
+func (t *vimTranslator) toExcmd(n, parent node.Node) io.Reader {
 	rs := make([]io.Reader, 0, 2)
 	_, isCall := n.(*callNode)
 	if !isCall && t.isVoidExpr(n, parent) {
@@ -839,7 +845,7 @@ func (t *vimTranslator) toExcmd(n, parent node) io.Reader {
 	return io.MultiReader(rs...)
 }
 
-func (t *vimTranslator) isVoidExpr(n, parent node) bool {
+func (t *vimTranslator) isVoidExpr(n, parent node.Node) bool {
 	switch parent.(type) {
 	case *topLevelNode:
 	case *funcStmtOrExpr:

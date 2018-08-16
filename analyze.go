@@ -4,36 +4,33 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/tyru/vain/node"
 )
 
-func analyze(name string, inNodes <-chan node) *analyzer {
-	return &analyzer{name, inNodes, make(chan node, 1)}
+func analyze(name string, inNodes <-chan node.Node) *analyzer {
+	return &analyzer{name, inNodes, make(chan node.Node, 1)}
 }
 
-func (a *analyzer) Nodes() <-chan node {
+func (a *analyzer) Nodes() <-chan node.Node {
 	return a.outNodes
 }
 
 type analyzer struct {
 	name     string
-	inNodes  <-chan node
-	outNodes chan node
+	inNodes  <-chan node.Node
+	outNodes chan node.Node
 }
 
 type typedNode struct {
-	node
+	node.Node
 	typ string // expression type
 }
 
-// Node calls inner impl node recursively to get real node.
-func (node *typedNode) Node() node {
-	return node.node.Node()
-}
-
 func (a *analyzer) Run() {
-	for node := range a.inNodes {
-		if top, ok := node.Node().(*topLevelNode); ok {
-			top, errs := a.analyze(top)
+	for n := range a.inNodes {
+		if _, ok := n.TerminalNode().(*topLevelNode); ok {
+			top, errs := a.analyze(n)
 			if len(errs) > 0 {
 				for i := range errs {
 					a.emit(&errs[i]) // type error, and so on
@@ -41,30 +38,35 @@ func (a *analyzer) Run() {
 				continue
 			}
 			a.emit(top)
-		} else if e, ok := node.Node().(*errorNode); ok {
+		} else if e, ok := n.TerminalNode().(*node.ErrorNode); ok {
 			a.emit(e) // parse error
 		} else {
-			err := fmt.Errorf("unknown node: %+v", node)
-			a.emit(a.err(err, node))
+			err := fmt.Errorf("unknown node: %+v", n)
+			a.emit(a.err(err, n))
 		}
 	}
 	close(a.outNodes)
 }
 
 // emit passes an node back to the client.
-func (a *analyzer) emit(n node) {
+func (a *analyzer) emit(n node.Node) {
 	a.outNodes <- n
 }
 
-func (a *analyzer) err(err error, n node) *errorNode {
-	pos := n.Position()
-	return &errorNode{
-		pos,
-		fmt.Errorf("[analyze] %s:%d:%d: "+err.Error(), a.name, pos.line, pos.col+1),
+func (a *analyzer) err(err error, n node.Node) *node.ErrorNode {
+	if pos := n.Position(); pos != nil {
+		return &node.ErrorNode{
+			fmt.Errorf("[analyze] %s:%d:%d: "+err.Error(), a.name, pos.Line, pos.Col+1),
+			pos,
+		}
+	}
+	return &node.ErrorNode{
+		fmt.Errorf("[analyze] %s: "+err.Error(), a.name),
+		nil,
 	}
 }
 
-func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
+func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {
 	// Perform semantics checks.
 	errs := a.check(top)
 	if len(errs) > 0 {
@@ -87,28 +89,28 @@ func (a *analyzer) analyze(top *topLevelNode) (node, []errorNode) {
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	top, ok := n.Node().(*topLevelNode)
+	top, ok := n.TerminalNode().(*topLevelNode)
 	if !ok {
 		err := a.err(
-			fmt.Errorf("fatal: topLevelNode is needed at top level (%+v)", n.Node()),
+			fmt.Errorf("fatal: topLevelNode is needed at top level (%+v)", n.TerminalNode()),
 			top,
 		)
-		return nil, []errorNode{*err}
+		return nil, []node.ErrorNode{*err}
 	}
 
 	return top, errs
 }
 
 // check checks the semantic errors.
-func (a *analyzer) check(top *topLevelNode) []errorNode {
-	errs := make([]errorNode, 0, 16)
+func (a *analyzer) check(top node.Node) []node.ErrorNode {
+	errs := make([]node.ErrorNode, 0, 16)
 	checkers := newSeriesCheckers(
 		a.checkToplevelReturn,
 		a.checkUndeclaredVariables,
 		a.checkDuplicateVariables,
 	)
 
-	walkNodes(top, func(ctrl *walkCtrl, n node) node {
+	walkNodes(top, func(ctrl *walkCtrl, n node.Node) node.Node {
 		errs = append(errs, checkers.check(ctrl, n)...)
 		return n
 	})
@@ -117,11 +119,13 @@ func (a *analyzer) check(top *topLevelNode) []errorNode {
 }
 
 // convertPre converts some specific nodes inplace.
-func (a *analyzer) convertPre(top *topLevelNode) {
-	top.body = a.convertVariableNames(top.body)
+func (a *analyzer) convertPre(n node.Node) {
+	if top, ok := n.TerminalNode().(*topLevelNode); ok {
+		top.body = a.convertVariableNames(top.body)
+	}
 }
 
-type checkFn func(*walkCtrl, node) []errorNode
+type checkFn func(*walkCtrl, node.Node) []node.ErrorNode
 
 type seriesCheck struct {
 	checkers     []checkFn
@@ -158,8 +162,8 @@ func (s *seriesCheck) isIgnored(route []int, paths [][]int) bool {
 // check calls check functions for node.
 // If all of check functions called dontFollowInner(),
 // check also calls dontFollowInner() for parent *walkCtrl.
-func (s *seriesCheck) check(ctrl *walkCtrl, n node) []errorNode {
-	errs := make([]errorNode, 0, 8)
+func (s *seriesCheck) check(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+	errs := make([]node.ErrorNode, 0, 8)
 	route := ctrl.route()
 	for i := range s.checkers {
 		if s.ctrlList[i].followInner && !s.isIgnored(route, s.ignoredPaths[i]) {
@@ -184,27 +188,27 @@ func (s *seriesCheck) check(ctrl *walkCtrl, n node) []errorNode {
 }
 
 // convertPost converts *typedNode to node.
-func (a *analyzer) convertPost(tNode *typedNode) (node, []errorNode) {
-	return walkNodes(tNode, func(_ *walkCtrl, n node) node {
+func (a *analyzer) convertPost(tNode *typedNode) (node.Node, []node.ErrorNode) {
+	return walkNodes(tNode, func(_ *walkCtrl, n node.Node) node.Node {
 		// Unwrap node from typedNode.
-		return n.Node()
+		return n.TerminalNode()
 	}), nil
 }
 
 // convertUnderscore converts variable name in the scope of body.
 // For example, "_varname" -> "__varname", "_" -> "_unused{nr}".
-func (a *analyzer) convertVariableNames(body []node) []node {
+func (a *analyzer) convertVariableNames(body []node.Node) []node.Node {
 	nr := 0
-	newbody := make([]node, 0, len(body))
+	newbody := make([]node.Node, 0, len(body))
 	for i := range body {
-		b := walkNodes(body[i], func(ctrl *walkCtrl, n node) node {
-			if f, ok := n.Node().(*funcStmtOrExpr); ok {
+		b := walkNodes(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
+			if f, ok := n.TerminalNode().(*funcStmtOrExpr); ok {
 				f.body = a.convertVariableNames(f.body)
 				ctrl.dontFollowInner()
 				return f
 			}
 			var con *constStatement
-			if c, ok := n.Node().(*constStatement); ok {
+			if c, ok := n.TerminalNode().(*constStatement); ok {
 				con = c
 			} else {
 				return n
@@ -213,9 +217,9 @@ func (a *analyzer) convertVariableNames(body []node) []node {
 				return n
 			}
 			var ids []*identifierNode
-			if l, ok := con.left.Node().(*listNode); ok { // Destructuring
+			if l, ok := con.left.TerminalNode().(*listNode); ok { // Destructuring
 				for i := range l.value {
-					if id, ok := l.value[i].(*identifierNode); ok {
+					if id, ok := l.value[i].TerminalNode().(*identifierNode); ok {
 						ids = append(ids, id)
 					}
 				}
@@ -241,8 +245,8 @@ func (a *analyzer) convertVariableNames(body []node) []node {
 }
 
 // infer infers each node's type and return the tree of *typedNode.
-func (a *analyzer) infer(top *topLevelNode) (*typedNode, []errorNode) {
-	typedTop := walkNodes(top, func(_ *walkCtrl, n node) node {
+func (a *analyzer) infer(top node.Node) (*typedNode, []node.ErrorNode) {
+	typedTop := walkNodes(top, func(_ *walkCtrl, n node.Node) node.Node {
 		return &typedNode{n, ""} // TODO
 	}).(*typedNode) // returned node must be *topLevelNode
 	return typedTop, nil
@@ -250,32 +254,32 @@ func (a *analyzer) infer(top *topLevelNode) (*typedNode, []errorNode) {
 
 // checkToplevelReturn checks if returnStatement exists under topLevelNode.
 // It doesn't check inside expression and function.
-func (a *analyzer) checkToplevelReturn(ctrl *walkCtrl, n node) []errorNode {
+func (a *analyzer) checkToplevelReturn(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	if n.IsExpr() {
 		ctrl.dontFollowInner()
 		return nil
 	}
-	if _, ok := n.Node().(*funcStmtOrExpr); ok {
+	if _, ok := n.TerminalNode().(*funcStmtOrExpr); ok {
 		ctrl.dontFollowInner()
 		return nil
 	}
-	if ret, ok := n.Node().(*returnStatement); ok {
+	if _, ok := n.TerminalNode().(*returnStatement); ok {
 		err := a.err(
 			errors.New("return statement found at top level"),
-			ret,
+			n,
 		)
-		return []errorNode{*err}
+		return []node.ErrorNode{*err}
 	}
 	return nil
 }
 
 // checkUndeclaredVariables checks if variables are used before declaration.
-func (a *analyzer) checkUndeclaredVariables(ctrl *walkCtrl, n node) []errorNode {
+func (a *analyzer) checkUndeclaredVariables(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	return nil // TODO
 }
 
 // checkDuplicateVariables checks if duplicate variable decralations exist.
-func (a *analyzer) checkDuplicateVariables(ctrl *walkCtrl, n node) []errorNode {
+func (a *analyzer) checkDuplicateVariables(ctrl *walkCtrl, n node.Node) []node.ErrorNode {
 	return nil // TODO
 }
 
@@ -300,7 +304,7 @@ func (ctrl *walkCtrl) route() []int {
 
 // walkNodes walks node recursively and call f with each node.
 // if f(node) == false, walk stops walking inner nodes.
-func walkNodes(n node, f func(*walkCtrl, node) node) node {
+func walkNodes(n node.Node, f func(*walkCtrl, node.Node) node.Node) node.Node {
 	return newWalkCtrl().walk(n, 0, f)
 }
 
@@ -312,7 +316,7 @@ func (ctrl *walkCtrl) pop() {
 	ctrl.routes = ctrl.routes[:len(ctrl.routes)-1]
 }
 
-func (ctrl *walkCtrl) walk(n node, id int, f func(*walkCtrl, node) node) node {
+func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) node.Node) node.Node {
 	if n == nil {
 		return nil
 	}
@@ -323,7 +327,7 @@ func (ctrl *walkCtrl) walk(n node, id int, f func(*walkCtrl, node) node) node {
 		return r
 	}
 
-	switch nn := r.Node().(type) {
+	switch nn := r.TerminalNode().(type) {
 	case *topLevelNode:
 		for i := range nn.body {
 			nn.body[i] = ctrl.walk(nn.body[i], i, f)

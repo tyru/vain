@@ -6,19 +6,21 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tyru/vain/node"
 )
 
 // TODO indent
 // TODO newline
 // TODO customize indent, newline
 
-func translateSexp(name string, inNodes <-chan node) translator {
+func translateSexp(name string, inNodes <-chan node.Node) translator {
 	return &sexpTranslator{name, inNodes, make(chan io.Reader), "  "}
 }
 
 type sexpTranslator struct {
 	name       string
-	inNodes    <-chan node
+	inNodes    <-chan node.Node
 	outReaders chan io.Reader
 	indent     string
 }
@@ -38,10 +40,14 @@ func (t *sexpTranslator) emit(r io.Reader) {
 	t.outReaders <- r
 }
 
-func (t *sexpTranslator) err(err error, node node) io.Reader {
-	pos := node.Position()
+func (t *sexpTranslator) err(err error, n node.Node) io.Reader {
+	if pos := n.Position(); pos != nil {
+		return &errorReader{
+			fmt.Errorf("[translate/sexp] %s:%d:%d: "+err.Error(), t.name, pos.Line, pos.Col+1),
+		}
+	}
 	return &errorReader{
-		fmt.Errorf("[translate/sexp] %s:%d:%d: "+err.Error(), t.name, pos.line, pos.col+1),
+		fmt.Errorf("[translate/sexp] %s: "+err.Error(), t.name),
 	}
 }
 
@@ -49,11 +55,11 @@ func (t *sexpTranslator) getIndent(level int) string {
 	return strings.Repeat(t.indent, level)
 }
 
-func (t *sexpTranslator) toReader(node node, level int) io.Reader {
+func (t *sexpTranslator) toReader(node node.Node, level int) io.Reader {
 	// fmt.Printf("%s: %+v (%+v)\n", t.name, node, reflect.TypeOf(node))
-	switch n := node.Node().(type) {
-	case *errorNode:
-		return &errorReader{n.err}
+	switch n := node.TerminalNode().(type) {
+	case error:
+		return &errorReader{n}
 	case *topLevelNode:
 		return t.newTopLevelNodeReader(n, level)
 	case *importStatement:
@@ -268,7 +274,7 @@ func (t *sexpTranslator) newReturnNodeReader(node *returnStatement, level int) i
 
 func (t *sexpTranslator) newConstStatementReader(node *constStatement, level int) io.Reader {
 	var left bytes.Buffer
-	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
+	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
 		left.WriteString("(")
 		for i := range list.value {
 			if i > 0 {
@@ -351,7 +357,7 @@ func (t *sexpTranslator) newWhileStatementReader(node *whileStatement, level int
 
 func (t *sexpTranslator) newForStatementReader(node *forStatement, level int) io.Reader {
 	var left bytes.Buffer
-	if list, ok := node.left.Node().(*listNode); ok { // Destructuring
+	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
 		left.WriteString("(")
 		for i := range list.value {
 			if i > 0 {

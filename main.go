@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"github.com/hashicorp/go-multierror"
+
+	"github.com/tyru/vain/node"
 )
 
 func main() {
@@ -103,8 +105,8 @@ func genFiles(name string) error {
 		return err
 	}
 
-	sexpCh := make(chan node, 1)
-	vimCh := make(chan node, 1)
+	sexpCh := make(chan node.Node, 1)
+	vimCh := make(chan node.Node, 1)
 
 	transpiler := transpile(name, content.String())
 	sexpTranslator := translateSexp(name, sexpCh)
@@ -128,12 +130,12 @@ func genFiles(name string) error {
 		wg.Done()
 	}()
 
-	// 3. []node -> []io.Reader
+	// 3. []node.Node -> []io.Reader
 	// io.Reader can also have errors.
 	go sexpTranslator.Run()
 	go vimTranslator.Run()
 
-	// 2. []node -> sexpTranslator, vimTranslator
+	// 2. []node.Node -> sexpTranslator, vimTranslator
 	go func() {
 		for node := range transpiler.Nodes() {
 			sexpCh <- node
@@ -143,7 +145,7 @@ func genFiles(name string) error {
 		close(vimCh)
 	}()
 
-	// 1. source code -> []node
+	// 1. source code -> []node.Node
 	go transpiler.Run()
 
 	wg.Wait()
@@ -208,17 +210,17 @@ func collectTargetFiles(args []string, files chan<- string) error {
 }
 
 func transpile(name, input string) *transpiler {
-	return &transpiler{name, input, make(chan node, 1)}
+	return &transpiler{name, input, make(chan node.Node, 1)}
 }
 
-func (t *transpiler) Nodes() <-chan node {
+func (t *transpiler) Nodes() <-chan node.Node {
 	return t.outNodes
 }
 
 type transpiler struct {
 	name     string
 	input    string
-	outNodes chan node
+	outNodes chan node.Node
 }
 
 func (t *transpiler) Run() {
@@ -227,7 +229,7 @@ func (t *transpiler) Run() {
 	parser := parse(t.name, lexer.Tokens())
 	analyzer := analyze(t.name, parser.Nodes())
 
-	// 4. []node -> send to t.outNodes
+	// 4. []node.Node -> send to t.outNodes
 	go func() {
 		for node := range analyzer.Nodes() {
 			t.outNodes <- node
@@ -236,10 +238,10 @@ func (t *transpiler) Run() {
 		done <- true
 	}()
 
-	// 3. []node -> Check semantic errors -> []node
+	// 3. []node.Node -> Check semantic errors -> []node.Node
 	go analyzer.Run()
 
-	// 2. []token -> Parse -> []node
+	// 2. []token -> Parse -> []node.Node
 	go parser.Run()
 
 	// 1. source code -> Lex -> []token
