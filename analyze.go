@@ -55,15 +55,15 @@ func (a *analyzer) emit(n node.Node) {
 
 func (a *analyzer) err(err error, n node.Node) *node.ErrorNode {
 	if pos := n.Position(); pos != nil {
-		return &node.ErrorNode{
-			fmt.Errorf("[analyze] %s:%d:%d: "+err.Error(), a.name, pos.Line, pos.Col+1),
+		return node.NewErrorNode(
+			fmt.Errorf("[analyze] %s:%d:%d: "+err.Error(), a.name, pos.Line(), pos.Col()+1),
 			pos,
-		}
+		)
 	}
-	return &node.ErrorNode{
+	return node.NewErrorNode(
 		fmt.Errorf("[analyze] %s: "+err.Error(), a.name),
 		nil,
-	}
+	)
 }
 
 func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {

@@ -13,6 +13,11 @@ type PosNode struct {
 	Node
 }
 
+// NewPosNode is the constructor for PosNode.
+func NewPosNode(pos *Pos, n Node) *PosNode {
+	return &PosNode{pos, n}
+}
+
 // Position returns pos.
 func (p *PosNode) Position() *Pos {
 	return p.Pos.Position()
@@ -23,12 +28,17 @@ func (p *PosNode) Position() *Pos {
 // Because it's a bother to use the above variables
 // for representing parse error of a node.
 type ErrorNode struct {
-	Err error
+	err error
 	*Pos
 }
 
+// NewErrorNode is the constructor for ErrorNode.
+func NewErrorNode(err error, pos *Pos) *ErrorNode {
+	return &ErrorNode{err, pos}
+}
+
 func (node *ErrorNode) Error() string {
-	return node.Err.Error()
+	return node.err.Error()
 }
 
 // TerminalNode returns itself.

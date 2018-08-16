@@ -37,7 +37,6 @@ type statement interface {
 
 func (p *parser) Run() {
 	if toplevel, ok := p.acceptTopLevel(); ok {
-		toplevel.Pos.Offset = 0 // first read node's position is -1. adjust it
 		p.emit(toplevel)
 	}
 	close(p.outNodes) // No more nodes will be delivered.
@@ -51,15 +50,15 @@ func (p *parser) emit(node node.Node) {
 // errorf returns an error token and terminates the scan
 func (p *parser) errorf(format string, args ...interface{}) {
 	newargs := make([]interface{}, 0, len(args)+2)
-	newargs = append(newargs, p.name, p.token.pos.Line, p.token.pos.Col+1)
+	newargs = append(newargs, p.name, p.token.pos.Line(), p.token.pos.Col()+1)
 	newargs = append(newargs, args...)
 	err := fmt.Errorf("[parse] %s:%d:%d: "+format, newargs...)
-	p.emit(&node.ErrorNode{err, p.token.pos})
+	p.emit(node.NewErrorNode(err, p.token.pos))
 }
 
 // lexError is called when tokenError was given.
 func (p *parser) lexError() {
-	p.emit(&node.ErrorNode{errors.New(p.token.val), p.token.pos})
+	p.emit(node.NewErrorNode(errors.New(p.token.val), p.token.pos))
 }
 
 // next returns the next token in the input.
@@ -150,12 +149,12 @@ func (n *topLevelNode) IsExpr() bool {
 }
 
 func (p *parser) acceptTopLevel() (*node.PosNode, bool) {
-	pos := &node.Pos{0, 1, 0}
+	pos := node.NewPos(0, 1, 0)
 	toplevel := &topLevelNode{make([]node.Node, 0, 32)}
 	for {
 		n, ok := p.acceptStmtOrExpr()
 		if !ok {
-			return &node.PosNode{pos, toplevel}, true
+			return node.NewPosNode(pos, toplevel), true
 		}
 		toplevel.body = append(toplevel.body, n)
 	}
@@ -194,7 +193,7 @@ func (p *parser) acceptStmtOrExpr() (node.Node, bool) {
 
 	// Comment
 	if p.accept(tokenComment) {
-		n := &node.PosNode{p.token.pos, &commentNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &commentNode{p.token.val})
 		return n, true
 	}
 
@@ -269,7 +268,7 @@ func (p *parser) acceptConstStatement() (node.Node, bool) {
 	if !ok {
 		return nil, false
 	}
-	n := &node.PosNode{pos, &constStatement{left, right, hasUnderscore}}
+	n := node.NewPosNode(pos, &constStatement{left, right, hasUnderscore})
 	return n, true
 }
 
@@ -278,9 +277,9 @@ func (p *parser) acceptAssignLHS() (node.Node, bool, bool) {
 	var left node.Node
 	var hasUnderscore bool
 	if p.accept(tokenIdentifier) {
-		left = &node.PosNode{p.token.pos, &identifierNode{p.token.val}}
+		left = node.NewPosNode(p.token.pos, &identifierNode{p.token.val})
 	} else if ids, underscore, listpos, ok := p.acceptDestructuringAssignment(); ok {
-		left = &node.PosNode{listpos, &listNode{ids}}
+		left = node.NewPosNode(listpos, &listNode{ids})
 		hasUnderscore = underscore
 	} else {
 		p.errorf("expected %s or destructuring assignment but got %s", tokenName(tokenIdentifier), tokenName(p.peek().typ))
@@ -316,7 +315,7 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *node.Pos, bool)
 		if p.token.val == "_" {
 			hasUnderscore = true
 		}
-		ids = append(ids, &node.PosNode{p.token.pos, &identifierNode{p.token.val}})
+		ids = append(ids, node.NewPosNode(p.token.pos, &identifierNode{p.token.val}))
 		p.acceptBlanks()
 		p.accept(tokenComma)
 		p.acceptBlanks()
@@ -353,17 +352,17 @@ func (p *parser) acceptReturnStatement() (node.Node, bool) {
 	}
 	ret := p.token
 	if p.accept(tokenNewline) {
-		return &node.PosNode{ret.pos, &returnStatement{nil}}, true
+		return node.NewPosNode(ret.pos, &returnStatement{nil}), true
 	}
 	if p.accept(tokenCClose) { // end of block
 		p.backup(p.token)
-		return &node.PosNode{ret.pos, &returnStatement{nil}}, true
+		return node.NewPosNode(ret.pos, &returnStatement{nil}), true
 	}
 	expr, ok := p.acceptExpr()
 	if !ok {
 		return nil, false
 	}
-	return &node.PosNode{ret.pos, &returnStatement{expr}}, true
+	return node.NewPosNode(ret.pos, &returnStatement{expr}), true
 }
 
 type ifStatement struct {
@@ -425,7 +424,7 @@ func (p *parser) acceptIfStatement() (node.Node, bool) {
 			return nil, false
 		}
 	}
-	n := &node.PosNode{pos, &ifStatement{cond, body, els}}
+	n := node.NewPosNode(pos, &ifStatement{cond, body, els})
 	return n, true
 }
 
@@ -463,7 +462,7 @@ func (p *parser) acceptWhileStatement() (node.Node, bool) {
 	if !ok {
 		return nil, false
 	}
-	n := &node.PosNode{pos, &whileStatement{cond, body}}
+	n := node.NewPosNode(pos, &whileStatement{cond, body})
 	return n, true
 }
 
@@ -513,7 +512,7 @@ func (p *parser) acceptForStatement() (node.Node, bool) {
 	if !ok {
 		return nil, false
 	}
-	n := &node.PosNode{pos, &forStatement{left, right, body, hasUnderscore}}
+	n := node.NewPosNode(pos, &forStatement{left, right, body, hasUnderscore})
 	return n, true
 }
 
@@ -579,7 +578,7 @@ func (p *parser) acceptImportStatement() (*node.PosNode, bool) {
 			}
 			pkgAlias = p.token.val
 		}
-		stmt := &node.PosNode{pos, &importStatement{pkg, pkgAlias, nil}}
+		stmt := node.NewPosNode(pos, &importStatement{pkg, pkgAlias, nil})
 		return stmt, true
 
 	} else if p.accept(tokenFrom) {
@@ -597,7 +596,7 @@ func (p *parser) acceptImportStatement() (*node.PosNode, bool) {
 		if !ok {
 			return nil, false
 		}
-		stmt := &node.PosNode{pos, &importStatement{pkg, "", fnlist}}
+		stmt := node.NewPosNode(pos, &importStatement{pkg, "", fnlist})
 		return stmt, true
 	}
 
@@ -718,7 +717,7 @@ func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, bool) {
 		body = []node.Node{expr}
 	}
 
-	f := &node.PosNode{pos, &funcStmtOrExpr{isExpr, mods, name, args, retType, bodyIsStmt, body}}
+	f := node.NewPosNode(pos, &funcStmtOrExpr{isExpr, mods, name, args, retType, bodyIsStmt, body})
 	return f, true
 }
 
@@ -904,7 +903,7 @@ func (p *parser) acceptExpr1() (expr, bool) {
 		if !ok {
 			return nil, false
 		}
-		left = &node.PosNode{p.token.pos, &ternaryNode{left, expr, right}}
+		left = node.NewPosNode(p.token.pos, &ternaryNode{left, expr, right})
 	}
 	return left, true
 }
@@ -955,7 +954,7 @@ func (p *parser) acceptExpr2() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else {
 			break
 		}
@@ -1004,7 +1003,7 @@ func (p *parser) acceptExpr3() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else {
 			break
 		}
@@ -1547,7 +1546,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenEqEqCi) {
 		pos := p.token.pos
 		n := &equalCiNode{left, nil}
@@ -1557,7 +1556,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenNeq) {
 		pos := p.token.pos
 		n := &nequalNode{left, nil}
@@ -1567,7 +1566,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenNeqCi) {
 		pos := p.token.pos
 		n := &nequalCiNode{left, nil}
@@ -1577,7 +1576,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenGt) {
 		pos := p.token.pos
 		n := &greaterNode{left, nil}
@@ -1587,7 +1586,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenGtCi) {
 		pos := p.token.pos
 		n := &greaterCiNode{left, nil}
@@ -1597,7 +1596,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenGtEq) {
 		pos := p.token.pos
 		n := &gequalNode{left, nil}
@@ -1607,7 +1606,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenGtEqCi) {
 		pos := p.token.pos
 		n := &gequalCiNode{left, nil}
@@ -1617,7 +1616,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenLt) {
 		pos := p.token.pos
 		n := &smallerNode{left, nil}
@@ -1627,7 +1626,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenLtCi) {
 		pos := p.token.pos
 		n := &smallerCiNode{left, nil}
@@ -1637,7 +1636,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenLtEq) {
 		pos := p.token.pos
 		n := &sequalNode{left, nil}
@@ -1647,7 +1646,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenLtEqCi) {
 		pos := p.token.pos
 		n := &sequalCiNode{left, nil}
@@ -1657,7 +1656,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenMatch) {
 		pos := p.token.pos
 		n := &matchNode{left, nil}
@@ -1667,7 +1666,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenMatchCi) {
 		pos := p.token.pos
 		n := &matchCiNode{left, nil}
@@ -1677,7 +1676,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenNoMatch) {
 		pos := p.token.pos
 		n := &noMatchNode{left, nil}
@@ -1687,7 +1686,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenNoMatchCi) {
 		pos := p.token.pos
 		n := &noMatchCiNode{left, nil}
@@ -1697,7 +1696,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenIs) {
 		pos := p.token.pos
 		n := &isNode{left, nil}
@@ -1707,7 +1706,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenIsCi) {
 		pos := p.token.pos
 		n := &isCiNode{left, nil}
@@ -1717,7 +1716,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenIsNot) {
 		pos := p.token.pos
 		n := &isNotNode{left, nil}
@@ -1727,7 +1726,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	} else if p.accept(tokenIsNotCi) {
 		pos := p.token.pos
 		n := &isNotCiNode{left, nil}
@@ -1737,7 +1736,7 @@ func (p *parser) acceptExpr4() (expr, bool) {
 			return nil, false
 		}
 		n.right = right
-		left = &node.PosNode{pos, n}
+		left = node.NewPosNode(pos, n)
 	}
 	return left, true
 }
@@ -1810,7 +1809,7 @@ func (p *parser) acceptExpr5() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else if p.accept(tokenMinus) {
 			pos := p.token.pos
 			n := &subtractNode{left, nil}
@@ -1820,7 +1819,7 @@ func (p *parser) acceptExpr5() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else {
 			break
 		}
@@ -1922,7 +1921,7 @@ func (p *parser) acceptExpr6() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else if p.accept(tokenSlash) {
 			pos := p.token.pos
 			n := &divideNode{left, nil}
@@ -1932,7 +1931,7 @@ func (p *parser) acceptExpr6() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else if p.accept(tokenPercent) {
 			pos := p.token.pos
 			n := &remainderNode{left, nil}
@@ -1942,7 +1941,7 @@ func (p *parser) acceptExpr6() (expr, bool) {
 				return nil, false
 			}
 			n.right = right
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else {
 			break
 		}
@@ -2024,21 +2023,21 @@ func (p *parser) acceptExpr7() (expr, bool) {
 		if !ok {
 			return nil, false
 		}
-		n := &node.PosNode{p.token.pos, &notNode{left}}
+		n := node.NewPosNode(p.token.pos, &notNode{left})
 		return n, true
 	} else if p.accept(tokenMinus) {
 		left, ok := p.acceptExpr7()
 		if !ok {
 			return nil, false
 		}
-		n := &node.PosNode{p.token.pos, &minusNode{left}}
+		n := node.NewPosNode(p.token.pos, &minusNode{left})
 		return n, true
 	} else if p.accept(tokenPlus) {
 		left, ok := p.acceptExpr7()
 		if !ok {
 			return nil, false
 		}
-		n := &node.PosNode{p.token.pos, &plusNode{left}}
+		n := node.NewPosNode(p.token.pos, &plusNode{left})
 		return n, true
 	} else {
 		n, ok := p.acceptExpr8()
@@ -2178,7 +2177,7 @@ func (p *parser) acceptExpr8() (expr, bool) {
 					p.errorf("expected %s but got %s", tokenName(tokenSqClose), tokenName(p.peek().typ))
 					return nil, false
 				}
-				left = &node.PosNode{npos, n}
+				left = node.NewPosNode(npos, n)
 			} else {
 				right, ok := p.acceptExpr1()
 				if !ok {
@@ -2200,7 +2199,7 @@ func (p *parser) acceptExpr8() (expr, bool) {
 						p.errorf("expected %s but got %s", tokenName(tokenSqClose), tokenName(p.peek().typ))
 						return nil, false
 					}
-					left = &node.PosNode{npos, n}
+					left = node.NewPosNode(npos, n)
 				} else {
 					n := &subscriptNode{left, right}
 					p.acceptBlanks()
@@ -2208,7 +2207,7 @@ func (p *parser) acceptExpr8() (expr, bool) {
 						p.errorf("expected %s but got %s", tokenName(tokenSqClose), tokenName(p.peek().typ))
 						return nil, false
 					}
-					left = &node.PosNode{npos, n}
+					left = node.NewPosNode(npos, n)
 				}
 			}
 		} else if p.accept(tokenPOpen) {
@@ -2237,7 +2236,7 @@ func (p *parser) acceptExpr8() (expr, bool) {
 					}
 				}
 			}
-			left = &node.PosNode{pos, n}
+			left = node.NewPosNode(pos, n)
 		} else if p.accept(tokenDot) {
 			dot := p.token
 			p.acceptBlanks()
@@ -2245,8 +2244,8 @@ func (p *parser) acceptExpr8() (expr, bool) {
 				p.errorf("expected %s but got %s", tokenName(tokenIdentifier), tokenName(p.peek().typ))
 				return nil, false
 			}
-			right := &node.PosNode{p.token.pos, &identifierNode{p.token.val}}
-			left = &node.PosNode{dot.pos, &dotNode{left, right}}
+			right := node.NewPosNode(p.token.pos, &identifierNode{p.token.val})
+			left = node.NewPosNode(dot.pos, &dotNode{left, right})
 		} else {
 			break
 		}
@@ -2411,13 +2410,13 @@ func (n *regNode) Value() string {
 //        @r
 func (p *parser) acceptExpr9() (expr, bool) {
 	if p.accept(tokenInt) {
-		n := &node.PosNode{p.token.pos, &intNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &intNode{p.token.val})
 		return n, true
 	} else if p.accept(tokenFloat) {
-		n := &node.PosNode{p.token.pos, &floatNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &floatNode{p.token.val})
 		return n, true
 	} else if p.accept(tokenString) {
-		n := &node.PosNode{p.token.pos, &stringNode{vainString(p.token.val)}}
+		n := node.NewPosNode(p.token.pos, &stringNode{vainString(p.token.val)})
 		return n, true
 	} else if p.accept(tokenSqOpen) {
 		n := &listNode{make([]expr, 0, 16)}
@@ -2444,7 +2443,7 @@ func (p *parser) acceptExpr9() (expr, bool) {
 				}
 			}
 		}
-		return &node.PosNode{p.token.pos, n}, true
+		return node.NewPosNode(p.token.pos, n), true
 	} else if p.accept(tokenCOpen) {
 		npos := p.token.pos
 		var m [][]expr
@@ -2458,7 +2457,7 @@ func (p *parser) acceptExpr9() (expr, bool) {
 				p.acceptBlanks()
 				t2 := p.next()
 				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
-					pair[0] = &node.PosNode{t1.pos, &identifierNode{t1.val}}
+					pair[0] = node.NewPosNode(t1.pos, &identifierNode{t1.val})
 					p.acceptBlanks()
 					right, ok := p.acceptExpr1()
 					if !ok {
@@ -2497,7 +2496,7 @@ func (p *parser) acceptExpr9() (expr, bool) {
 				}
 			}
 		}
-		n := &node.PosNode{npos, &dictionaryNode{m}}
+		n := node.NewPosNode(npos, &dictionaryNode{m})
 		return n, true
 	} else if p.accept(tokenPOpen) {
 		p.acceptBlanks()
@@ -2515,16 +2514,16 @@ func (p *parser) acceptExpr9() (expr, bool) {
 		p.backup(p.token)
 		return p.acceptFunction(true)
 	} else if p.accept(tokenOption) {
-		n := &node.PosNode{p.token.pos, &optionNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &optionNode{p.token.val})
 		return n, true
 	} else if p.accept(tokenIdentifier) {
-		n := &node.PosNode{p.token.pos, &identifierNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &identifierNode{p.token.val})
 		return n, true
 	} else if p.accept(tokenEnv) {
-		n := &node.PosNode{p.token.pos, &envNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &envNode{p.token.val})
 		return n, true
 	} else if p.accept(tokenReg) {
-		n := &node.PosNode{p.token.pos, &regNode{p.token.val}}
+		n := node.NewPosNode(p.token.pos, &regNode{p.token.val})
 		return n, true
 	}
 	p.errorf("expected expression but got %s", tokenName(p.peek().typ))

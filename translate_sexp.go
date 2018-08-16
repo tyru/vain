@@ -43,7 +43,7 @@ func (t *sexpTranslator) emit(r io.Reader) {
 func (t *sexpTranslator) err(err error, n node.Node) io.Reader {
 	if pos := n.Position(); pos != nil {
 		return &errorReader{
-			fmt.Errorf("[translate/sexp] %s:%d:%d: "+err.Error(), t.name, pos.Line, pos.Col+1),
+			fmt.Errorf("[translate/sexp] %s:%d:%d: "+err.Error(), t.name, pos.Line(), pos.Col()+1),
 		}
 	}
 	return &errorReader{

@@ -446,7 +446,7 @@ func (l *lexer) acceptKeyword(kw string, boundary bool) bool {
 
 // emit passes an token back to the client.
 func (l *lexer) emit(t tokenType) {
-	pos := &node.Pos{l.offset, l.line, l.col}
+	pos := node.NewPos(l.offset, l.line, l.col)
 	l.tokens <- token{t, pos, l.input[l.start:l.offset]}
 	l.start = l.offset
 }
@@ -458,7 +458,7 @@ func (l *lexer) errorf(format string, args ...interface{}) lexStateFn {
 	newargs := make([]interface{}, 0, len(args)+3)
 	newargs = append(newargs, l.name, l.line, l.col+1)
 	newargs = append(newargs, args...)
-	pos := &node.Pos{l.offset, l.line, l.col}
+	pos := node.NewPos(l.offset, l.line, l.col)
 	l.tokens <- token{
 		tokenError,
 		pos,
