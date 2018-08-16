@@ -9,14 +9,21 @@ import (
 )
 
 func analyze(name string, inNodes <-chan node.Node) *analyzer {
-	return &analyzer{name, inNodes, make(chan node.Node, 1), defaultPolicies}
+	// TODO give policies by argument?
+	checkers := make([]checkFn, 0, len(ruleChecker))
+	for name, checker := range ruleChecker {
+		if defaultPolicies[name] {
+			checkers = append(checkers, checker)
+		}
+	}
+	return &analyzer{name, inNodes, make(chan node.Node, 1), newSeriesChecker(checkers...)}
 }
 
 type analyzer struct {
 	name     string
 	inNodes  <-chan node.Node
 	outNodes chan node.Node
-	policies map[string]bool
+	checker  *seriesChecker
 }
 
 func (a *analyzer) Nodes() <-chan node.Node {
@@ -140,19 +147,10 @@ func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {
 // check checks the semantic errors.
 func (a *analyzer) check(top node.Node) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 16)
-	checkers := make([]checkFn, 0, len(ruleChecker))
-	for name, checker := range ruleChecker {
-		if a.policies[name] {
-			checkers = append(checkers, checker)
-		}
-	}
-	checker := newSeriesChecker(checkers...)
-
 	walkNodes(top, func(ctrl *walkCtrl, n node.Node) node.Node {
-		errs = append(errs, checker.check(a, ctrl, n)...)
+		errs = append(errs, a.checker.check(a, ctrl, n)...)
 		return n
 	})
-
 	return errs
 }
 
