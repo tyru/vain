@@ -70,6 +70,14 @@ type typedNode struct {
 	typ string // expression type
 }
 
+func (n *typedNode) Clone() node.Node {
+	var inner node.Node
+	if n.Node != nil {
+		inner = n.Node.Clone()
+	}
+	return &typedNode{inner, n.typ}
+}
+
 func (a *analyzer) Run() {
 	for n := range a.inNodes {
 		if _, ok := n.TerminalNode().(*topLevelNode); ok {
@@ -116,8 +124,8 @@ func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {
 		return nil, errs
 	}
 
-	// Convert node inplace.
-	a.convertPre(top)
+	// Convert node.
+	top = a.convertPre(top)
 
 	// Infer type (convert the node to *typedNode).
 	tNode, errs := a.infer(top)
@@ -185,11 +193,14 @@ func checkDuplicateVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.Er
 	return nil // TODO
 }
 
-// convertPre converts some specific nodes inplace.
-func (a *analyzer) convertPre(n node.Node) {
-	if top, ok := n.TerminalNode().(*topLevelNode); ok {
-		top.body = a.convertVariableNames(top.body)
-	}
+// convertPre converts some specific nodes.
+// convertPre *does not* change n inplacely.
+// It clones the node, convert, and return it.
+func (a *analyzer) convertPre(n node.Node) node.Node {
+	// NOTE: Already checked n.TerminalNode() can be *topLevelNode at caller.
+	top := n.TerminalNode().Clone().(*topLevelNode)
+	top.body = a.convertVariableNames(top.body)
+	return top
 }
 
 // convertUnderscore converts variable name in the scope of body.

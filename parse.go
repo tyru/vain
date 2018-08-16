@@ -136,6 +136,15 @@ type topLevelNode struct {
 	body []node.Node
 }
 
+// Clone clones itself.
+func (n *topLevelNode) Clone() node.Node {
+	body := make([]node.Node, len(n.body))
+	for i := range n.body {
+		body[i] = n.body[i].Clone()
+	}
+	return &topLevelNode{body}
+}
+
 func (n *topLevelNode) TerminalNode() node.Node {
 	return n
 }
@@ -162,6 +171,11 @@ func (p *parser) acceptTopLevel() (*node.PosNode, bool) {
 
 type commentNode struct {
 	value string
+}
+
+// Clone clones itself.
+func (n *commentNode) Clone() node.Node {
+	return &commentNode{n.value}
 }
 
 func (n *commentNode) TerminalNode() node.Node {
@@ -235,6 +249,11 @@ type constStatement struct {
 	left          node.Node
 	right         expr
 	hasUnderscore bool
+}
+
+// Clone clones itself.
+func (n *constStatement) Clone() node.Node {
+	return &constStatement{n.left.Clone(), n.right.Clone(), n.hasUnderscore}
 }
 
 func (n *constStatement) TerminalNode() node.Node {
@@ -330,6 +349,14 @@ type returnStatement struct {
 	left expr
 }
 
+// Clone clones itself.
+func (n *returnStatement) Clone() node.Node {
+	if n.left == nil {
+		return &returnStatement{nil}
+	}
+	return &returnStatement{n.left.Clone()}
+}
+
 func (n *returnStatement) TerminalNode() node.Node {
 	return n
 }
@@ -369,6 +396,21 @@ type ifStatement struct {
 	cond expr
 	body []node.Node
 	els  []node.Node
+}
+
+// Clone clones itself.
+func (n *ifStatement) Clone() node.Node {
+	body := make([]node.Node, len(n.body))
+	for i := range n.body {
+		body[i] = n.body[i].Clone()
+	}
+	els := make([]node.Node, len(n.els))
+	for i := range n.els {
+		els[i] = n.els[i].Clone()
+	}
+	return &ifStatement{
+		n.cond.Clone(), body, els,
+	}
 }
 
 func (n *ifStatement) TerminalNode() node.Node {
@@ -433,6 +475,17 @@ type whileStatement struct {
 	body []node.Node
 }
 
+// Clone clones itself.
+func (n *whileStatement) Clone() node.Node {
+	body := make([]node.Node, len(n.body))
+	for i := range n.body {
+		body[i] = n.body[i].Clone()
+	}
+	return &whileStatement{
+		n.cond.Clone(), body,
+	}
+}
+
 func (n *whileStatement) TerminalNode() node.Node {
 	return n
 }
@@ -471,6 +524,17 @@ type forStatement struct {
 	right         expr
 	body          []node.Node
 	hasUnderscore bool
+}
+
+// Clone clones itself.
+func (n *forStatement) Clone() node.Node {
+	body := make([]node.Node, len(n.body))
+	for i := range n.body {
+		body[i] = n.body[i].Clone()
+	}
+	return &forStatement{
+		n.left.Clone(), n.right.Clone(), body, n.hasUnderscore,
+	}
 }
 
 func (n *forStatement) TerminalNode() node.Node {
@@ -545,6 +609,19 @@ type importStatement struct {
 	pkg      vainString
 	pkgAlias string
 	fnlist   [][]string
+}
+
+// Clone clones itself.
+func (n *importStatement) Clone() node.Node {
+	fnlist := make([][]string, len(n.fnlist))
+	for i := range n.fnlist {
+		pair := make([]string, len(n.fnlist[i]))
+		copy(pair, n.fnlist[i])
+		fnlist[i] = pair
+	}
+	return &importStatement{
+		n.pkg, n.pkgAlias, n.fnlist,
+	}
 }
 
 func (n *importStatement) TerminalNode() node.Node {
@@ -647,6 +724,23 @@ type funcStmtOrExpr struct {
 	retType    string
 	bodyIsStmt bool
 	body       []node.Node
+}
+
+// Clone clones itself.
+func (n *funcStmtOrExpr) Clone() node.Node {
+	mods := make([]string, len(n.mods))
+	copy(mods, n.mods)
+	args := make([]argument, len(n.args))
+	for i := range n.args {
+		args[i] = *n.args[i].Clone()
+	}
+	body := make([]node.Node, len(n.body))
+	for i := range n.body {
+		body[i] = n.body[i].Clone()
+	}
+	return &funcStmtOrExpr{
+		n.isExpr, mods, n.name, args, n.retType, n.bodyIsStmt, body,
+	}
 }
 
 func (n *funcStmtOrExpr) TerminalNode() node.Node {
@@ -815,6 +909,13 @@ type argument struct {
 	defaultVal expr
 }
 
+func (a *argument) Clone() *argument {
+	if a.defaultVal != nil {
+		return &argument{a.name, a.typ, a.defaultVal.Clone()}
+	}
+	return &argument{a.name, a.typ, nil}
+}
+
 // functionArgument := identifier ":" *blanks type /
 //                     identifier "=" *blanks expr
 func (p *parser) acceptFunctionArgument() (*argument, bool) {
@@ -869,6 +970,11 @@ type ternaryNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *ternaryNode) Clone() node.Node {
+	return &ternaryNode{n.cond.Clone(), n.left.Clone(), n.right.Clone()}
+}
+
 func (n *ternaryNode) TerminalNode() node.Node {
 	return n
 }
@@ -916,6 +1022,11 @@ type binaryOpNode interface {
 type orNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *orNode) Clone() node.Node {
+	return &orNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *orNode) TerminalNode() node.Node {
@@ -967,6 +1078,11 @@ type andNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *andNode) Clone() node.Node {
+	return &andNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *andNode) TerminalNode() node.Node {
 	return n
 }
@@ -1016,6 +1132,11 @@ type equalNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *equalNode) Clone() node.Node {
+	return &equalNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *equalNode) TerminalNode() node.Node {
 	return n
 }
@@ -1039,6 +1160,11 @@ func (n *equalNode) Right() node.Node {
 type equalCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *equalCiNode) Clone() node.Node {
+	return &equalCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *equalCiNode) TerminalNode() node.Node {
@@ -1066,6 +1192,11 @@ type nequalNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *nequalNode) Clone() node.Node {
+	return &nequalNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *nequalNode) TerminalNode() node.Node {
 	return n
 }
@@ -1089,6 +1220,11 @@ func (n *nequalNode) Right() node.Node {
 type nequalCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *nequalCiNode) Clone() node.Node {
+	return &nequalCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *nequalCiNode) TerminalNode() node.Node {
@@ -1116,6 +1252,11 @@ type greaterNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *greaterNode) Clone() node.Node {
+	return &greaterNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *greaterNode) TerminalNode() node.Node {
 	return n
 }
@@ -1139,6 +1280,11 @@ func (n *greaterNode) Right() node.Node {
 type greaterCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *greaterCiNode) Clone() node.Node {
+	return &greaterCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *greaterCiNode) TerminalNode() node.Node {
@@ -1166,6 +1312,11 @@ type gequalNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *gequalNode) Clone() node.Node {
+	return &gequalNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *gequalNode) TerminalNode() node.Node {
 	return n
 }
@@ -1189,6 +1340,11 @@ func (n *gequalNode) Right() node.Node {
 type gequalCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *gequalCiNode) Clone() node.Node {
+	return &gequalCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *gequalCiNode) TerminalNode() node.Node {
@@ -1216,6 +1372,11 @@ type smallerNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *smallerNode) Clone() node.Node {
+	return &smallerNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *smallerNode) TerminalNode() node.Node {
 	return n
 }
@@ -1239,6 +1400,11 @@ func (n *smallerNode) Right() node.Node {
 type smallerCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *smallerCiNode) Clone() node.Node {
+	return &smallerCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *smallerCiNode) TerminalNode() node.Node {
@@ -1266,6 +1432,11 @@ type sequalNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *sequalNode) Clone() node.Node {
+	return &sequalNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *sequalNode) TerminalNode() node.Node {
 	return n
 }
@@ -1289,6 +1460,11 @@ func (n *sequalNode) Right() node.Node {
 type sequalCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *sequalCiNode) Clone() node.Node {
+	return &sequalCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *sequalCiNode) TerminalNode() node.Node {
@@ -1316,6 +1492,11 @@ type matchNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *matchNode) Clone() node.Node {
+	return &matchNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *matchNode) TerminalNode() node.Node {
 	return n
 }
@@ -1339,6 +1520,11 @@ func (n *matchNode) Right() node.Node {
 type matchCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *matchCiNode) Clone() node.Node {
+	return &matchCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *matchCiNode) TerminalNode() node.Node {
@@ -1366,6 +1552,11 @@ type noMatchNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *noMatchNode) Clone() node.Node {
+	return &noMatchNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *noMatchNode) TerminalNode() node.Node {
 	return n
 }
@@ -1389,6 +1580,11 @@ func (n *noMatchNode) Right() node.Node {
 type noMatchCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *noMatchCiNode) Clone() node.Node {
+	return &noMatchCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *noMatchCiNode) TerminalNode() node.Node {
@@ -1416,6 +1612,11 @@ type isNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *isNode) Clone() node.Node {
+	return &isNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *isNode) TerminalNode() node.Node {
 	return n
 }
@@ -1439,6 +1640,11 @@ func (n *isNode) Right() node.Node {
 type isCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *isCiNode) Clone() node.Node {
+	return &isCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *isCiNode) TerminalNode() node.Node {
@@ -1466,6 +1672,11 @@ type isNotNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *isNotNode) Clone() node.Node {
+	return &isNotNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *isNotNode) TerminalNode() node.Node {
 	return n
 }
@@ -1489,6 +1700,11 @@ func (n *isNotNode) Right() node.Node {
 type isNotCiNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *isNotCiNode) Clone() node.Node {
+	return &isNotCiNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *isNotCiNode) TerminalNode() node.Node {
@@ -1746,6 +1962,11 @@ type addNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *addNode) Clone() node.Node {
+	return &addNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *addNode) TerminalNode() node.Node {
 	return n
 }
@@ -1769,6 +1990,11 @@ func (n *addNode) Right() node.Node {
 type subtractNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *subtractNode) Clone() node.Node {
+	return &subtractNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *subtractNode) TerminalNode() node.Node {
@@ -1832,6 +2058,11 @@ type multiplyNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *multiplyNode) Clone() node.Node {
+	return &multiplyNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *multiplyNode) TerminalNode() node.Node {
 	return n
 }
@@ -1857,6 +2088,11 @@ type divideNode struct {
 	right expr
 }
 
+// Clone clones itself.
+func (n *divideNode) Clone() node.Node {
+	return &divideNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *divideNode) TerminalNode() node.Node {
 	return n
 }
@@ -1880,6 +2116,11 @@ func (n *divideNode) Right() node.Node {
 type remainderNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *remainderNode) Clone() node.Node {
+	return &remainderNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *remainderNode) TerminalNode() node.Node {
@@ -1957,6 +2198,11 @@ type notNode struct {
 	left expr
 }
 
+// Clone clones itself.
+func (n *notNode) Clone() node.Node {
+	return &notNode{n.left.Clone()}
+}
+
 func (n *notNode) TerminalNode() node.Node {
 	return n
 }
@@ -1977,6 +2223,11 @@ type minusNode struct {
 	left expr
 }
 
+// Clone clones itself.
+func (n *minusNode) Clone() node.Node {
+	return &minusNode{n.left.Clone()}
+}
+
 func (n *minusNode) TerminalNode() node.Node {
 	return n
 }
@@ -1995,6 +2246,11 @@ func (n *minusNode) Value() node.Node {
 
 type plusNode struct {
 	left expr
+}
+
+// Clone clones itself.
+func (n *plusNode) Clone() node.Node {
+	return &plusNode{n.left.Clone()}
 }
 
 func (n *plusNode) TerminalNode() node.Node {
@@ -2053,6 +2309,19 @@ type sliceNode struct {
 	rlist []expr
 }
 
+// Clone clones itself.
+func (n *sliceNode) Clone() node.Node {
+	rlist := make([]expr, len(n.rlist))
+	for i := range n.rlist {
+		if n.rlist[i] != nil {
+			rlist[i] = n.rlist[i].Clone()
+		} else {
+			rlist[i] = nil
+		}
+	}
+	return &sliceNode{n.left.Clone(), rlist}
+}
+
 func (n *sliceNode) TerminalNode() node.Node {
 	return n
 }
@@ -2070,6 +2339,15 @@ type callNode struct {
 	rlist []expr
 }
 
+// Clone clones itself.
+func (n *callNode) Clone() node.Node {
+	rlist := make([]expr, len(n.rlist))
+	for i := range n.rlist {
+		rlist[i] = n.rlist[i].Clone()
+	}
+	return &callNode{n.left.Clone(), rlist}
+}
+
 func (n *callNode) TerminalNode() node.Node {
 	return n
 }
@@ -2085,6 +2363,11 @@ func (n *callNode) IsExpr() bool {
 type subscriptNode struct {
 	left  expr
 	right expr
+}
+
+// Clone clones itself.
+func (n *subscriptNode) Clone() node.Node {
+	return &subscriptNode{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *subscriptNode) TerminalNode() node.Node {
@@ -2112,6 +2395,11 @@ type dotNode struct {
 	right node.Node
 }
 
+// Clone clones itself.
+func (n *dotNode) Clone() node.Node {
+	return &dotNode{n.left.Clone(), n.right.Clone()}
+}
+
 func (n *dotNode) TerminalNode() node.Node {
 	return n
 }
@@ -2134,6 +2422,11 @@ func (n *dotNode) Right() node.Node {
 
 type identifierNode struct {
 	value string
+}
+
+// Clone clones itself.
+func (n *identifierNode) Clone() node.Node {
+	return &identifierNode{n.value}
 }
 
 func (n *identifierNode) TerminalNode() node.Node {
@@ -2262,6 +2555,11 @@ type intNode struct {
 	value string
 }
 
+// Clone clones itself.
+func (n *intNode) Clone() node.Node {
+	return &intNode{n.value}
+}
+
 func (n *intNode) TerminalNode() node.Node {
 	return n
 }
@@ -2276,6 +2574,11 @@ func (n *intNode) IsExpr() bool {
 
 type floatNode struct {
 	value string
+}
+
+// Clone clones itself.
+func (n *floatNode) Clone() node.Node {
+	return &floatNode{n.value}
 }
 
 func (n *floatNode) TerminalNode() node.Node {
@@ -2294,6 +2597,11 @@ type stringNode struct {
 	value vainString
 }
 
+// Clone clones itself.
+func (n *stringNode) Clone() node.Node {
+	return &stringNode{n.value}
+}
+
 func (n *stringNode) TerminalNode() node.Node {
 	return n
 }
@@ -2308,6 +2616,15 @@ func (n *stringNode) IsExpr() bool {
 
 type listNode struct {
 	value []expr
+}
+
+// Clone clones itself.
+func (n *listNode) Clone() node.Node {
+	value := make([]expr, len(n.value))
+	for i := range n.value {
+		value[i] = n.value[i].Clone()
+	}
+	return &listNode{value}
 }
 
 func (n *listNode) TerminalNode() node.Node {
@@ -2326,6 +2643,19 @@ type dictionaryNode struct {
 	value [][]expr
 }
 
+// Clone clones itself.
+func (n *dictionaryNode) Clone() node.Node {
+	value := make([][]expr, len(n.value))
+	for i := range n.value {
+		kv := make([]expr, len(n.value[i]))
+		for j := range n.value[i] {
+			kv[j] = n.value[i][j].Clone()
+		}
+		value[i] = kv
+	}
+	return &dictionaryNode{value}
+}
+
 func (n *dictionaryNode) TerminalNode() node.Node {
 	return n
 }
@@ -2340,6 +2670,11 @@ func (n *dictionaryNode) IsExpr() bool {
 
 type optionNode struct {
 	value string
+}
+
+// Clone clones itself.
+func (n *optionNode) Clone() node.Node {
+	return &optionNode{n.value}
 }
 
 func (n *optionNode) TerminalNode() node.Node {
@@ -2362,6 +2697,11 @@ type envNode struct {
 	value string
 }
 
+// Clone clones itself.
+func (n *envNode) Clone() node.Node {
+	return &envNode{n.value}
+}
+
 func (n *envNode) TerminalNode() node.Node {
 	return n
 }
@@ -2380,6 +2720,11 @@ func (n *envNode) Value() string {
 
 type regNode struct {
 	value string
+}
+
+// Clone clones itself.
+func (n *regNode) Clone() node.Node {
+	return &regNode{n.value}
 }
 
 func (n *regNode) TerminalNode() node.Node {
