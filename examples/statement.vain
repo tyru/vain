@@ -1,6 +1,6 @@
 if 1 {
-  f(42)
   12
+  34
 } else if 2 {
   45
   68
@@ -9,6 +9,7 @@ if 1 {
   91
 }
 
+const echo = func(msg:String){}
 while 42 {
   echo("hello")
   echo("what's up")
@@ -19,6 +20,7 @@ for v in [1,2,3] {
   echo("yo")
 }
 
+const range = func(begin:Int,end:Int){}
 for n in range(1, 100) {
   if n % 15 == 0 {
     echo("fizzbuzz")
@@ -27,6 +29,6 @@ for n in range(1, 100) {
   } else if n % 3 == 0 {
     echo("fizz")
   } else {
-    echo(i.toString())
+    echo(n.toString())
   }
 }

@@ -65,9 +65,13 @@ endfunction
 " 1 * 3
 " 1 / 3
 " 1 % 3
+let foo = {}
 " foo["bar"]
-" foo[1:2]
-call foo(1,2,3)
-" foo.bar
+let bar = []
+" bar[1:2]
+let f = 
+call f(1,2,3)
+let obj = {}
+" obj.prop
 " [1,2,3]
 " {'key':'value','k1':42}

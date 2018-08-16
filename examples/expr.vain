@@ -38,7 +38,9 @@
 {}
 {key: 'value'}
 {'key': 'value'}
+const foo = {}
 foo.bar
+const bar = ''
 foo[bar]
 foo["bar"]
 foo()
@@ -47,9 +49,11 @@ foo[bar]()
 foo["bar"]()
 foo.bar.baz()
 foo.bar.baz(42, "hello", [123], {key: 42})
+const arr = []
 arr[0:1]
 arr[:1]
 arr[0:]
+const [begin, end] = [1,2]
 arr[begin:end]
 arr[:end]
 arr[begin:]

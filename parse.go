@@ -300,7 +300,7 @@ func (p *parser) acceptAssignLHS() (node.Node, bool, bool) {
 	var left node.Node
 	var hasUnderscore bool
 	if p.accept(tokenIdentifier) {
-		left = node.NewPosNode(p.token.pos, &identifierNode{p.token.val})
+		left = node.NewPosNode(p.token.pos, &identifierNode{p.token.val, true})
 	} else if ids, underscore, listpos, ok := p.acceptDestructuringAssignment(); ok {
 		left = node.NewPosNode(listpos, &listNode{ids})
 		hasUnderscore = underscore
@@ -338,7 +338,7 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *node.Pos, bool)
 		if p.token.val == "_" {
 			hasUnderscore = true
 		}
-		ids = append(ids, node.NewPosNode(p.token.pos, &identifierNode{p.token.val}))
+		ids = append(ids, node.NewPosNode(p.token.pos, &identifierNode{p.token.val, true}))
 		p.acceptBlanks()
 		p.accept(tokenComma)
 		p.acceptBlanks()
@@ -376,7 +376,7 @@ func (n *letStatement) IsExpr() bool {
 	return false
 }
 
-// letStatement := "let" assignLhs ( LF | "=" expr )
+// letStatement := "let" assignLhs ( LF | EOF | "=" expr )
 // And if tokenCClose is detected instead of expr,
 // it must be only decralation (no expr) inside block.
 func (p *parser) acceptLetStatement() (*node.PosNode, bool) {
@@ -390,6 +390,11 @@ func (p *parser) acceptLetStatement() (*node.PosNode, bool) {
 		return nil, false
 	}
 	if p.accept(tokenNewline) {
+		n := node.NewPosNode(pos, &letStatement{left, nil, hasUnderscore})
+		return n, true
+	}
+	if p.accept(tokenEOF) {
+		p.backup(p.token)
 		n := node.NewPosNode(pos, &letStatement{left, nil, hasUnderscore})
 		return n, true
 	}
@@ -434,7 +439,7 @@ func (n *returnStatement) IsExpr() bool {
 	return false
 }
 
-// returnStatement := "return" ( expr | LF )
+// returnStatement := "return" ( expr | LF | EOF )
 // And if tokenCClose is detected instead of expr,
 // it must be empty return statement inside block.
 func (p *parser) acceptReturnStatement() (node.Node, bool) {
@@ -444,6 +449,10 @@ func (p *parser) acceptReturnStatement() (node.Node, bool) {
 	}
 	ret := p.token
 	if p.accept(tokenNewline) {
+		return node.NewPosNode(ret.pos, &returnStatement{nil}), true
+	}
+	if p.accept(tokenEOF) {
+		p.backup(p.token)
 		return node.NewPosNode(ret.pos, &returnStatement{nil}), true
 	}
 	if p.accept(tokenCClose) { // end of block
@@ -2486,12 +2495,13 @@ func (n *dotNode) Right() node.Node {
 }
 
 type identifierNode struct {
-	value string
+	value     string
+	isVarname bool
 }
 
 // Clone clones itself.
 func (n *identifierNode) Clone() node.Node {
-	return &identifierNode{n.value}
+	return &identifierNode{n.value, n.isVarname}
 }
 
 func (n *identifierNode) TerminalNode() node.Node {
@@ -2602,7 +2612,7 @@ func (p *parser) acceptExpr8() (expr, bool) {
 				p.errorf("expected %s but got %s", tokenName(tokenIdentifier), tokenName(p.peek().typ))
 				return nil, false
 			}
-			right := node.NewPosNode(p.token.pos, &identifierNode{p.token.val})
+			right := node.NewPosNode(p.token.pos, &identifierNode{p.token.val, false})
 			left = node.NewPosNode(dot.pos, &dotNode{left, right})
 		} else {
 			break
@@ -2866,8 +2876,9 @@ func (p *parser) acceptExpr9() (expr, bool) {
 				t1 := p.next()
 				p.acceptBlanks()
 				t2 := p.next()
+				// TODO { [expr] : expr }
 				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
-					pair[0] = node.NewPosNode(t1.pos, &identifierNode{t1.val})
+					pair[0] = node.NewPosNode(t1.pos, &identifierNode{t1.val, false})
 					p.acceptBlanks()
 					right, ok := p.acceptExpr1()
 					if !ok {
@@ -2927,7 +2938,7 @@ func (p *parser) acceptExpr9() (expr, bool) {
 		n := node.NewPosNode(p.token.pos, &optionNode{p.token.val})
 		return n, true
 	} else if p.accept(tokenIdentifier) {
-		n := node.NewPosNode(p.token.pos, &identifierNode{p.token.val})
+		n := node.NewPosNode(p.token.pos, &identifierNode{p.token.val, true})
 		return n, true
 	} else if p.accept(tokenEnv) {
 		n := node.NewPosNode(p.token.pos, &envNode{p.token.val})

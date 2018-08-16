@@ -9,14 +9,24 @@ import (
 )
 
 func analyze(name string, inNodes <-chan node.Node) *analyzer {
-	// TODO give policies by argument?
+	// TODO Give policies by argument?
+	// But some rules are required to emit "correct" vim script intermediate code.
+	policies := defaultPolicies
 	checkers := make([]checkFn, 0, len(ruleChecker))
+	added := make(map[string]bool, len(ruleChecker))
 	for name, checker := range ruleChecker {
-		if defaultPolicies[name] {
+		if policies[name] && !added[name] {
 			checkers = append(checkers, checker)
+			added[name] = true
 		}
 	}
-	return &analyzer{name, inNodes, make(chan node.Node, 1), newSeriesChecker(checkers...)}
+	return &analyzer{
+		name,
+		inNodes,
+		make(chan node.Node, 1),
+		newSeriesChecker(checkers...),
+		policies,
+	}
 }
 
 type analyzer struct {
@@ -24,11 +34,23 @@ type analyzer struct {
 	inNodes  <-chan node.Node
 	outNodes chan node.Node
 	checker  *seriesChecker
+	policies map[string]bool
 }
 
 func (a *analyzer) Nodes() <-chan node.Node {
 	return a.outNodes
 }
+
+func (a *analyzer) enabled(name string) bool {
+	return a.policies[name]
+}
+
+const (
+	toplevelReturn              = "toplevel-return"
+	undeclaredVariable          = "undeclared-variable"
+	duplicateDeclaration        = "duplicate-declaration"
+	underscoreVariableReference = "underscore-variable-reference"
+)
 
 func init() {
 	def := []struct {
@@ -37,18 +59,23 @@ func init() {
 		enabled bool
 	}{
 		{
-			"toplevel-return",
+			toplevelReturn,
 			checkToplevelReturn,
 			true,
 		},
 		{
-			"undeclared-variables",
-			checkUndeclaredVariables,
+			undeclaredVariable,
+			checkVariable,
 			true,
 		},
 		{
-			"duplicate-variables",
-			checkDuplicateVariables,
+			duplicateDeclaration,
+			checkVariable,
+			true,
+		},
+		{
+			underscoreVariableReference,
+			checkVariable,
 			true,
 		},
 	}
@@ -151,6 +178,8 @@ func (a *analyzer) check(tNode *typedNode) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 16)
 	walkNode(tNode, func(ctrl *walkCtrl, n node.Node) node.Node {
 		tNode := n.(*typedNode) // NOTE: Given node must be *typedNode.
+		// TODO Run each check functions concurrently:
+		// Pool goroutines to process the checks and run them in the goroutines.
 		errs = append(errs, a.checker.check(a, ctrl, tNode)...)
 		return n
 	})
@@ -179,14 +208,198 @@ func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []node.E
 	return nil
 }
 
-// checkUndeclaredVariables checks if variables are used before declaration.
-func checkUndeclaredVariables(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []node.ErrorNode {
-	return nil // TODO
+func newScope() *scope {
+	return &scope{make([]map[string]*identifierNode, 0, 4)}
 }
 
-// checkDuplicateVariables checks if duplicate variable decralations exist.
-func checkDuplicateVariables(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []node.ErrorNode {
-	return nil // TODO
+type scope struct {
+	vars []map[string]*identifierNode
+}
+
+func (s *scope) push() {
+	s.vars = append(s.vars, make(map[string]*identifierNode, 8))
+}
+
+func (s *scope) pop() {
+	s.vars = s.vars[:len(s.vars)-1]
+}
+
+func (s *scope) getVar(name string) *identifierNode {
+	return s.vars[len(s.vars)-1][name]
+}
+
+func (s *scope) getOuterVar(name string) *identifierNode {
+	for i := len(s.vars) - 1; i >= 0; i-- {
+		if s.vars[i][name] != nil {
+			return s.vars[i][name]
+		}
+	}
+	return nil
+}
+
+func (s *scope) addVar(id *identifierNode) {
+	s.vars[len(s.vars)-1][id.value] = id
+}
+
+// checkVariable checks:
+// * toplevel-return
+//   * Variables are used before declaration.
+// * undeclared-variable
+//   * Duplicate variable decralations exist.
+// * underscore-variable-reference
+//   * Underscore identifier ("_") is used for the variable which is referenced.
+func checkVariable(a *analyzer, _ *walkCtrl, tNode *typedNode) []node.ErrorNode {
+	switch nn := tNode.TerminalNode().(type) {
+	case *topLevelNode:
+		return a.checkVariable(nn.body, newScope())
+	case *funcStmtOrExpr:
+		return a.checkVariable(nn.body, newScope())
+	default:
+		return nil
+	}
+}
+
+// Check the scope of the function, but won't check another function's scope.
+func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNode {
+	errs := make([]node.ErrorNode, 0, 4)
+	scope.push()
+	for i := range body {
+		if vs := a.getDeclaredVars(body[i]); len(vs) > 0 { // Found declaration.
+			for i := range vs {
+				var id *identifierNode
+				if nn, ok := vs[i].TerminalNode().(*identifierNode); ok {
+					id = nn
+				} else {
+					continue
+				}
+				if v := scope.getVar(id.value); v != nil {
+					if a.enabled(duplicateDeclaration) {
+						var declared string
+						if pos := v.Position(); pos != nil {
+							declared = fmt.Sprintf(": already declared at (%d,%d)", pos.Line(), pos.Col()+1)
+						}
+						err := a.err(
+							fmt.Errorf("duplicate variable: %s%s", id.value, declared),
+							vs[i],
+						)
+						errs = append(errs, *err)
+					}
+					continue
+				}
+				if id.value != "_" {
+					scope.addVar(id)
+				}
+			}
+		}
+		if e := a.checkInnerBlock(body[i], scope); len(e) > 0 { // Check if,while,...
+			errs = append(errs, e...)
+		}
+		vs, e := a.getReferenceVars(body[i])
+		errs = append(errs, e...)
+		if len(vs) > 0 { // Found referenced variables.
+			for i := range vs {
+				var id *identifierNode
+				if nn, ok := vs[i].TerminalNode().(*identifierNode); ok {
+					id = nn
+				} else {
+					continue
+				}
+				if v := scope.getOuterVar(id.value); v == nil && a.enabled(undeclaredVariable) {
+					err := a.err(
+						errors.New("undefined: "+id.value),
+						vs[i],
+					)
+					errs = append(errs, *err)
+				}
+			}
+		}
+	}
+	scope.pop()
+	return errs
+}
+
+func (a *analyzer) checkInnerBlock(n node.Node, scope *scope) []node.ErrorNode {
+	switch nn := n.TerminalNode().(type) {
+	case *ifStatement:
+		return a.checkVariable(nn.body, scope)
+	case *whileStatement:
+		return a.checkVariable(nn.body, scope)
+	case *forStatement:
+		return a.checkVariable(nn.body, scope)
+	default:
+		return nil
+	}
+}
+
+// Get variable identifier nodes in a declaration.
+// Returned nodes also have a position (node.Position() != nil)
+// if original node has a position.
+func (a *analyzer) getDeclaredVars(n node.Node) []node.Node {
+	var left node.Node
+	switch nn := n.TerminalNode().(type) {
+	case *constStatement:
+		left = nn.left
+	case *letStatement:
+		left = nn.left
+	case *forStatement:
+		left = nn.left
+	default:
+		return nil
+	}
+	switch nn := left.TerminalNode().(type) {
+	case *listNode:
+		vars := make([]node.Node, 0, len(nn.value))
+		for i := range nn.value {
+			if _, ok := nn.value[i].TerminalNode().(*identifierNode); ok {
+				vars = append(vars, nn.value[i])
+			}
+		}
+		return vars
+	case *identifierNode:
+		return []node.Node{left}
+	default:
+		return nil
+	}
+}
+
+// Get variable identifier nodes which references to.
+// Returned nodes also have a position (node.Position() != nil)
+// if original node has a position.
+func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode) {
+	errs := make([]node.ErrorNode, 0, 4)
+	ids := make([]node.Node, 0, 8)
+	declroutes := make([][]int, 0, 8)
+	walkNode(n, func(ctrl *walkCtrl, n node.Node) node.Node {
+		switch nn := n.TerminalNode().(type) {
+		case *constStatement:
+			lhs := append(ctrl.route(), 0)
+			declroutes = append(declroutes, lhs)
+		case *letStatement:
+			lhs := append(ctrl.route(), 0)
+			declroutes = append(declroutes, lhs)
+		case *forStatement:
+			lhs := append(ctrl.route(), 0)
+			declroutes = append(declroutes, lhs)
+		case *identifierNode:
+			// The identifierNode is used for variable name, and
+			// is not in left-hand side of declaration node.
+			if nn.isVarname && !containsRoute(ctrl.route(), declroutes) {
+				if nn.value == "_" {
+					if a.enabled(underscoreVariableReference) {
+						err := a.err(
+							errors.New("underscore variable can be used only in declaration"),
+							n,
+						)
+						errs = append(errs, *err)
+					}
+				} else {
+					ids = append(ids, n)
+				}
+			}
+		}
+		return n
+	})
+	return ids, errs
 }
 
 // convertPre converts some specific nodes.
@@ -339,6 +552,12 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 		ctrl.pop()
 	case *returnStatement:
 		nn.left = ctrl.walk(nn.left, 0, f)
+	case *constStatement:
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
+	case *letStatement:
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
 	case *ifStatement:
 		nn.cond = ctrl.walk(nn.cond, 0, f)
 		ctrl.push(1)
@@ -521,16 +740,16 @@ func newSeriesChecker(checkers ...checkFn) *seriesChecker {
 	return &seriesChecker{checkers, ctrlList, ignoredPaths}
 }
 
-func (s *seriesChecker) isIgnored(route []int, paths [][]int) bool {
-	for i := range paths {
-		ignored := true
-		for j := range paths[i] {
-			if route[j] != paths[i][j] {
-				ignored = false
+func containsRoute(r []int, routes [][]int) bool {
+	for i := range routes {
+		contains := true
+		for j := range routes[i] {
+			if r[j] != routes[i][j] {
+				contains = false
 				break
 			}
 		}
-		if ignored {
+		if contains {
 			return true
 		}
 	}
@@ -544,7 +763,7 @@ func (s *seriesChecker) check(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []n
 	errs := make([]node.ErrorNode, 0, 8)
 	route := ctrl.route()
 	for i := range s.checkers {
-		if s.ctrlList[i].followInner && !s.isIgnored(route, s.ignoredPaths[i]) {
+		if s.ctrlList[i].followInner && !containsRoute(route, s.ignoredPaths[i]) {
 			errs = append(errs, s.checkers[i](a, s.ctrlList[i], tNode)...)
 			if !s.ctrlList[i].followInner {
 				s.ignoredPaths[i] = append(s.ignoredPaths[i], route)
