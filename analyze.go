@@ -156,79 +156,42 @@ func (a *analyzer) check(top node.Node) []node.ErrorNode {
 	return errs
 }
 
+// checkToplevelReturn checks if returnStatement exists under topLevelNode.
+// It doesn't check inside expression and function.
+func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+	if n.IsExpr() {
+		ctrl.dontFollowInner()
+		return nil
+	}
+	if _, ok := n.TerminalNode().(*funcStmtOrExpr); ok {
+		ctrl.dontFollowInner()
+		return nil
+	}
+	if _, ok := n.TerminalNode().(*returnStatement); ok {
+		err := a.err(
+			errors.New("return statement found at top level"),
+			n,
+		)
+		return []node.ErrorNode{*err}
+	}
+	return nil
+}
+
+// checkUndeclaredVariables checks if variables are used before declaration.
+func checkUndeclaredVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+	return nil // TODO
+}
+
+// checkDuplicateVariables checks if duplicate variable decralations exist.
+func checkDuplicateVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+	return nil // TODO
+}
+
 // convertPre converts some specific nodes inplace.
 func (a *analyzer) convertPre(n node.Node) {
 	if top, ok := n.TerminalNode().(*topLevelNode); ok {
 		top.body = a.convertVariableNames(top.body)
 	}
-}
-
-type seriesCheck struct {
-	checkers     []checkFn
-	ctrlList     []*walkCtrl
-	ignoredPaths [][][]int
-}
-
-func newSeriesChecker(checkers ...checkFn) *seriesCheck {
-	ctrlList := make([]*walkCtrl, len(checkers))
-	ignoredPaths := make([][][]int, len(checkers))
-	for i := range checkers {
-		ctrlList[i] = newWalkCtrl()
-		ignoredPaths[i] = make([][]int, 0)
-	}
-	return &seriesCheck{checkers, ctrlList, ignoredPaths}
-}
-
-func (s *seriesCheck) isIgnored(route []int, paths [][]int) bool {
-	for i := range paths {
-		ignored := true
-		for j := range paths[i] {
-			if route[j] != paths[i][j] {
-				ignored = false
-				break
-			}
-		}
-		if ignored {
-			return true
-		}
-	}
-	return false
-}
-
-// check calls check functions for node.
-// If all of check functions called dontFollowInner(),
-// check also calls dontFollowInner() for parent *walkCtrl.
-func (s *seriesCheck) check(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
-	errs := make([]node.ErrorNode, 0, 8)
-	route := ctrl.route()
-	for i := range s.checkers {
-		if s.ctrlList[i].followInner && !s.isIgnored(route, s.ignoredPaths[i]) {
-			errs = append(errs, s.checkers[i](a, s.ctrlList[i], n)...)
-			if !s.ctrlList[i].followInner {
-				s.ignoredPaths[i] = append(s.ignoredPaths[i], route)
-				s.ctrlList[i].followInner = true
-			}
-		}
-	}
-
-	followInner := false
-	for i := range s.ctrlList {
-		if s.ctrlList[i].followInner {
-			followInner = true
-		}
-	}
-	if !followInner {
-		ctrl.dontFollowInner()
-	}
-	return errs
-}
-
-// convertPost converts *typedNode to node.
-func (a *analyzer) convertPost(tNode *typedNode) (node.Node, []node.ErrorNode) {
-	return walkNodes(tNode, func(_ *walkCtrl, n node.Node) node.Node {
-		// Unwrap node from typedNode.
-		return n.TerminalNode()
-	}), nil
 }
 
 // convertUnderscore converts variable name in the scope of body.
@@ -288,35 +251,12 @@ func (a *analyzer) infer(top node.Node) (*typedNode, []node.ErrorNode) {
 	return typedTop, nil
 }
 
-// checkToplevelReturn checks if returnStatement exists under topLevelNode.
-// It doesn't check inside expression and function.
-func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
-	if n.IsExpr() {
-		ctrl.dontFollowInner()
-		return nil
-	}
-	if _, ok := n.TerminalNode().(*funcStmtOrExpr); ok {
-		ctrl.dontFollowInner()
-		return nil
-	}
-	if _, ok := n.TerminalNode().(*returnStatement); ok {
-		err := a.err(
-			errors.New("return statement found at top level"),
-			n,
-		)
-		return []node.ErrorNode{*err}
-	}
-	return nil
-}
-
-// checkUndeclaredVariables checks if variables are used before declaration.
-func checkUndeclaredVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
-	return nil // TODO
-}
-
-// checkDuplicateVariables checks if duplicate variable decralations exist.
-func checkDuplicateVariables(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
-	return nil // TODO
+// convertPost converts *typedNode to node.
+func (a *analyzer) convertPost(tNode *typedNode) (node.Node, []node.ErrorNode) {
+	return walkNodes(tNode, func(_ *walkCtrl, n node.Node) node.Node {
+		// Unwrap node from typedNode.
+		return n.TerminalNode()
+	}), nil
 }
 
 func newWalkCtrl() *walkCtrl {
@@ -548,4 +488,63 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 
 	ctrl.pop()
 	return r
+}
+
+type seriesChecker struct {
+	checkers     []checkFn
+	ctrlList     []*walkCtrl
+	ignoredPaths [][][]int
+}
+
+func newSeriesChecker(checkers ...checkFn) *seriesChecker {
+	ctrlList := make([]*walkCtrl, len(checkers))
+	ignoredPaths := make([][][]int, len(checkers))
+	for i := range checkers {
+		ctrlList[i] = newWalkCtrl()
+		ignoredPaths[i] = make([][]int, 0)
+	}
+	return &seriesChecker{checkers, ctrlList, ignoredPaths}
+}
+
+func (s *seriesChecker) isIgnored(route []int, paths [][]int) bool {
+	for i := range paths {
+		ignored := true
+		for j := range paths[i] {
+			if route[j] != paths[i][j] {
+				ignored = false
+				break
+			}
+		}
+		if ignored {
+			return true
+		}
+	}
+	return false
+}
+
+// check calls check functions for node.
+// If all of check functions called dontFollowInner(),
+// check also calls dontFollowInner() for parent *walkCtrl.
+func (s *seriesChecker) check(a *analyzer, ctrl *walkCtrl, n node.Node) []node.ErrorNode {
+	errs := make([]node.ErrorNode, 0, 8)
+	route := ctrl.route()
+	for i := range s.checkers {
+		if s.ctrlList[i].followInner && !s.isIgnored(route, s.ignoredPaths[i]) {
+			errs = append(errs, s.checkers[i](a, s.ctrlList[i], n)...)
+			if !s.ctrlList[i].followInner {
+				s.ignoredPaths[i] = append(s.ignoredPaths[i], route)
+				s.ctrlList[i].followInner = true
+			}
+		}
+	}
+	followInner := false
+	for i := range s.ctrlList {
+		if s.ctrlList[i].followInner {
+			followInner = true
+		}
+	}
+	if !followInner {
+		ctrl.dontFollowInner()
+	}
+	return errs
 }
