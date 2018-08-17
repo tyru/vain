@@ -65,6 +65,7 @@ func (p *parser) lexError() *node.ErrorNode {
 }
 
 // next returns the next token in the input.
+// If the next token is EOF, backup it for the next next().
 func (p *parser) next() *token {
 	var t token
 	if len(p.tokbuf) > 0 {
@@ -74,6 +75,9 @@ func (p *parser) next() *token {
 		t = <-p.inTokens
 	}
 	p.token = &t
+	if t.typ == tokenEOF {
+		p.backup(&t)
+	}
 	return &t
 }
 
@@ -109,21 +113,30 @@ func (p *parser) acceptSpaces() bool {
 	return false
 }
 
-// acceptBlanks accepts 1*( LF | comment ) .
+// acceptBlanks accepts 1*( LF | comment | EOF ) .
 func (p *parser) acceptBlanks() bool {
 	t := p.next()
-	if t.typ == tokenNewline || t.typ == tokenComment {
-		for {
-			t = p.next()
-			if t.typ == tokenNewline || t.typ == tokenComment {
-				continue
-			}
+	switch t.typ {
+	case tokenNewline:
+	case tokenComment:
+	case tokenEOF:
+		return true
+	default:
+		p.backup(t)
+		return false
+	}
+	for {
+		t = p.next()
+		switch t.typ {
+		case tokenNewline:
+		case tokenComment:
+		case tokenEOF:
+			return true
+		default:
 			p.backup(t)
 			return true
 		}
 	}
-	p.backup(t)
-	return false
 }
 
 // acceptIdentifierLike accepts token where canBeIdentifier(token) == true
@@ -478,6 +491,16 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 	pos := p.token.pos
 	var left node.Node
 	var right node.Node
+
+	if p.accept(tokenIdentifier) { // for human
+		id := p.token
+		if p.acceptBlanks() {
+			return nil, p.errorf(
+				"expected type specifier but got %s", tokenName(p.peek().typ),
+			)
+		}
+		p.backup(id)
+	}
 
 	if arg, err := p.acceptVariableAndType(); err == nil {
 		if id, ok := arg.left.TerminalNode().(*identifierNode); ok {

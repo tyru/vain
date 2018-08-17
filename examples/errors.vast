@@ -11,3 +11,6 @@
 (# " let foo")
 (# " const echo = func(msg:String){}")
 (# " echo(_)")
+(# " expected type specifier but got newline")
+(# " expected type specifier but got EOF")
+(# " let baz")
