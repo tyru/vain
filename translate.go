@@ -434,26 +434,12 @@ func (t *translator) newWhileStatementReader(node *whileStatement, parent node.N
 func (t *translator) newForStatementReader(node *forStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("for ")
-	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
-		buf.WriteString("[")
-		for i := range list.value {
-			if i > 0 {
-				buf.WriteString(",")
-			}
-			_, err := io.Copy(&buf, t.toReader(list.value[i], parent))
-			if err != nil {
-				return t.err(err, list.value[i])
-			}
-		}
-		buf.WriteString("]")
-	} else {
-		_, err := io.Copy(&buf, t.toReader(node.left, parent))
-		if err != nil {
-			return t.err(err, node.left)
-		}
+	_, err := io.Copy(&buf, t.toReader(node.left, parent))
+	if err != nil {
+		return t.err(err, node.left)
 	}
 	buf.WriteString(" in ")
-	_, err := io.Copy(&buf, t.toReader(node.right, parent))
+	_, err = io.Copy(&buf, t.toReader(node.right, parent))
 	if err != nil {
 		return t.err(err, node.right)
 	}
@@ -489,26 +475,12 @@ func (t *translator) newReturnNodeReader(node *returnStatement, parent node.Node
 func (t *translator) newAssignStatementReader(node assignStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("let ")
-	if list, ok := node.Left().TerminalNode().(*listNode); ok { // Destructuring
-		buf.WriteString("[")
-		for i := range list.value {
-			if i > 0 {
-				buf.WriteString(",")
-			}
-			_, err := io.Copy(&buf, t.toReader(list.value[i], parent))
-			if err != nil {
-				return t.err(err, list.value[i])
-			}
-		}
-		buf.WriteString("]")
-	} else {
-		_, err := io.Copy(&buf, t.toReader(node.Left(), parent))
-		if err != nil {
-			return t.err(err, node.Left())
-		}
+	_, err := io.Copy(&buf, t.toReader(node.Left(), parent))
+	if err != nil {
+		return t.err(err, node.Left())
 	}
 	buf.WriteString(" = ")
-	_, err := io.Copy(&buf, t.toReader(node.Right(), parent))
+	_, err = io.Copy(&buf, t.toReader(node.Right(), parent))
 	if err != nil {
 		return t.err(err, node.Right())
 	}
