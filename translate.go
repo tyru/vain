@@ -692,11 +692,7 @@ func (t *translator) newDictionaryNodeReader(node *dictionaryNode, parent node.N
 		var key bytes.Buffer
 		keyNode := node.value[i][0]
 		if id, ok := keyNode.(*identifierNode); ok {
-			s, err := unevalString(id.value)
-			if err != nil {
-				return t.err(err, keyNode)
-			}
-			key.WriteString(string(*s))
+			key.WriteString(string(*unevalString(id.value)))
 		} else {
 			_, err := io.Copy(&key, t.toReader(keyNode, parent))
 			if err != nil {

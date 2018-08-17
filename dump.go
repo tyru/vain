@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -242,11 +243,11 @@ func (d *dumper) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 		bodyList = append(bodyList, buf.String())
 	}
 
-	vs, err := unevalString(f.retType)
+	retType, err := d.toJSONString(unevalString(f.retType))
 	if err != nil {
+		err = errors.New("cannot convert function return type: " + err.Error())
 		return d.err(err, f)
 	}
-	retType, err := d.toJSONString(vs)
 
 	// TODO Check len(bodyList) == 1 when f.bodyIsStmt == false in analyzer.
 	var body string

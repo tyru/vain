@@ -9,9 +9,9 @@ import (
 
 type vainString string
 
-func unevalString(s string) (*vainString, error) {
+func unevalString(s string) *vainString {
 	vs := vainString("'" + strings.Replace(s, "'", "''", -1) + "'")
-	return &vs, nil
+	return &vs
 }
 
 func (vs *vainString) eval() (string, error) {
