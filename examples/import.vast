@@ -1,4 +1,0 @@
-(import ("$vim/ex"))
-(import ("$vim/ex" 'excmd))
-(import ("$vim/ex") ((echo) (execute)))
-(import ("$vim/ex") ((echo) (execute exe)))

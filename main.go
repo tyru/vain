@@ -129,16 +129,16 @@ func genFiles(name string) error {
 		return err
 	}
 
-	dumpCh := make(chan node.Node, 1)
+	formatCh := make(chan node.Node, 1)
 	analyzeCh := make(chan node.Node, 1)
 
 	lexer := lex(name, content.String())
 	parser := parse(name, lexer.Tokens())
-	dumper := dump(name, dumpCh)
+	formatter := format(name, formatCh)
 	analyzer := analyze(name, analyzeCh)
 	translator := translate(name, analyzer.Nodes())
 
-	vastFile := name[:len(name)-len(".vain")] + ".vast"
+	prettifiedFile := name[:len(name)-len(".vain")] + ".vain.pretty"
 	vimFile := name[:len(name)-len(".vain")] + ".vim"
 	writeErr := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -159,20 +159,20 @@ func genFiles(name string) error {
 	// 4.1. []io.Reader -> Write to file.vast
 	wg.Add(1)
 	go func() {
-		writeErr <- writeReaders(dumper.Readers(), vastFile)
+		writeErr <- writeReaders(formatter.Readers(), prettifiedFile)
 		wg.Done()
 	}()
 
-	// 4. []node.Node -> Dump AST -> []io.Reader
-	go dumper.Run()
+	// 4. []node.Node -> Format codes -> []io.Reader
+	go formatter.Run()
 
-	// 3. []node.Node -> 4. dumper, 5. analyzer
+	// 3. []node.Node -> 4. formatter, 5. analyzer
 	go func() {
 		for node := range parser.Nodes() {
-			dumpCh <- node
+			formatCh <- node
 			analyzeCh <- node
 		}
-		close(dumpCh)
+		close(formatCh)
 		close(analyzeCh)
 	}()
 

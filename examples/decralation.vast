@@ -1,7 +1,0 @@
-(# " top level")
-(const 'foo 42)
-(let 'bar 1)
-(let (('baz : Int)))
-(if 42 ((let 'foo 123) (if 42 ((let 'bar 456)))))
-(func () f () "" ((const (list 'foo '_) (list 1 2)) (const (list '_ 'bar '_) (list 1 2 3)) (const (list '_ '_ 'baz) (list 1 2 3)) (const (list '_unused1) (list 1)) (const '_unused2 2) (while 42 ((let (list 'l '_) (list 123 456)) (let (list '_ 'r) (list 123 456)) (if 42 ((let (list 'l '_) (list 123 456)) (let (list '_ 'r) (list 123 456))))))))
-(func () g () "" ((const 'foo 42)   (func () inner () "" ((const 'foo 42) (const (list '_ 'bar '_) (list 1 2 3)) (while 42 ((let (list 'l '_) (list 123 456)) (let (list '_ 'r) (list 123 456)) (if 42 ((let (list 'l '_) (list 123 456)) (let (list '_ 'r) (list 123 456))))))))))

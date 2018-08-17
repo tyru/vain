@@ -1,6 +1,0 @@
-(if 1 (12 34) ((if 2 (45 68) (90 91))))
-(const 'echo (func ()  (('msg : String)) "" ()))
-(while 42 ((call 'echo "hello") (call 'echo "what's up")))
-(for 'v (list 1 2 3) ((call 'echo (+ "hey:" 'v)) (call 'echo "yo")))
-(const 'range (func ()  (('begin : Int) ('end : Int)) "" ()))
-(for 'n (call 'range 1 100) ((if (== (% 'n 15) 0) ((call 'echo "fizzbuzz")) ((if (== (% 'n 5) 0) ((call 'echo "buzz")) ((if (== (% 'n 3) 0) ((call 'echo "fizz")) ((call 'echo (call (dot 'n 'toString)))))))))))

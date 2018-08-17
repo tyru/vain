@@ -1,0 +1,37 @@
+if 1 {
+  12
+  34
+} else {
+  if 2 {
+    45
+    68
+  } else {
+    90
+    91
+  }
+}
+const echo = func (msg) { }
+while 42 {
+  echo("hello")
+  echo("what's up")
+}
+for v in [1,2,3] {
+  echo("hey:" + v)
+  echo("yo")
+}
+const range = func (begin, end) { }
+for n in range(1, 100) {
+  if ((n % 15) ==# 0) {
+    echo("fizzbuzz")
+  } else {
+    if ((n % 5) ==# 0) {
+      echo("buzz")
+    } else {
+      if ((n % 3) ==# 0) {
+        echo("fizz")
+      } else {
+        echo(n.toString())
+      }
+    }
+  }
+}
