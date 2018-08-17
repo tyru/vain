@@ -1,4 +1,9 @@
 scriptencoding utf-8
+" vain: begin named expression functions
+function! s:_vain_dummy_lambda1(a,b,c) abort
+endfunction
+" vain: end named expression functions
+
 
 
 if 1
@@ -69,7 +74,7 @@ let foo = {}
 foo["bar"]
 let bar = []
 bar[1:2]
-let f = 
+let f = function('s:_vain_dummy_lambda1')
 call f(1,2,3)
 let obj = {}
 obj.prop

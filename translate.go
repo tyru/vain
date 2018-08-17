@@ -11,7 +11,7 @@ import (
 )
 
 func translate(name string, inNodes <-chan node.Node) *translator {
-	return &translator{name, inNodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16)}
+	return &translator{name, inNodes, make(chan io.Reader), "  ", 0, make([]io.Reader, 0, 16), 0}
 }
 
 type translator struct {
@@ -21,6 +21,7 @@ type translator struct {
 	indentStr      string
 	level          int
 	namedExprFuncs []io.Reader
+	lambdaFuncID   int
 }
 
 func (t *translator) Run() {
@@ -218,26 +219,28 @@ func (t *translator) newFuncReader(f *funcStmtOrExpr, parent node.Node) io.Reade
 	if !f.IsExpr() {
 		// Function statement is required.
 		if f.name != "" {
-			return t.newFuncStmtReader(f)
+			return t.newFuncStmtReader(f, "")
 		}
-		// TODO Check len(f.body) == 1 here in analyzer.
 		if len(f.body) == 0 {
-			return emptyReader
+			autoload, global, _ := t.convertModifiers(f.mods)
+			name := t.getFuncName(f, autoload, global)
+			if name == "" {
+				name = t.generateFuncName()
+			}
+			t.namedExprFuncs = append(t.namedExprFuncs, t.newFuncStmtReader(f, name))
+			return strings.NewReader(fmt.Sprintf("function('%s')", name))
 		}
 		return t.newLambdaReader(f, parent)
 	}
 	// Function expression is required.
-	if f.name != "" {
-		if !t.isVoidExprFunc(f, parent) {
-			t.namedExprFuncs = append(t.namedExprFuncs, t.newFuncStmtReader(f))
-		}
+	if f.name != "" || len(f.body) == 0 {
 		autoload, global, _ := t.convertModifiers(f.mods)
 		name := t.getFuncName(f, autoload, global)
+		if name == "" {
+			name = t.generateFuncName()
+		}
+		t.namedExprFuncs = append(t.namedExprFuncs, t.newFuncStmtReader(f, name))
 		return strings.NewReader(fmt.Sprintf("function('%s')", name))
-	}
-	// TODO Check len(f.body) == 1 here in analyzer.
-	if len(f.body) == 0 {
-		return emptyReader
 	}
 	return t.newLambdaReader(f, parent)
 }
@@ -261,6 +264,9 @@ func (t *translator) isVoidExprFunc(f *funcStmtOrExpr, parent node.Node) bool {
 }
 
 func (t *translator) getFuncName(f *funcStmtOrExpr, autoload, global bool) string {
+	if f.name == "" {
+		return ""
+	}
 	if autoload {
 		return f.name
 	} else if global {
@@ -270,9 +276,17 @@ func (t *translator) getFuncName(f *funcStmtOrExpr, autoload, global bool) strin
 	return "s:" + f.name
 }
 
-func (t *translator) newFuncStmtReader(f *funcStmtOrExpr) io.Reader {
+func (t *translator) generateFuncName() string {
+	// TODO check conflict
+	t.lambdaFuncID++
+	return fmt.Sprintf("s:_vain_dummy_lambda%d", t.lambdaFuncID)
+}
+
+func (t *translator) newFuncStmtReader(f *funcStmtOrExpr, name string) io.Reader {
 	autoload, global, vimmods := t.convertModifiers(f.mods)
-	name := t.getFuncName(f, autoload, global)
+	if name == "" {
+		name = t.getFuncName(f, autoload, global)
+	}
 	var buf bytes.Buffer
 	buf.WriteString("function! ")
 	buf.WriteString(name)
