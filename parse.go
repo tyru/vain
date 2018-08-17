@@ -2971,7 +2971,7 @@ func (n *regNode) Value() string {
 // expr9: number /
 //        (string ABNF is too complex! e.g. "string\n", 'str''ing') /
 //        "[" *blank *( expr1 *blank "," *blank ) "]" /
-//        "{" *blank *( ( identifierLike | expr1 ) *blank ":" *blank expr1 *blank "," *blank ) "}" /
+//        "{" *blank *( expr1 *blank ":" *blank expr1 *blank "," *blank ) "}" /
 //        &option /
 //        "(" *blank expr1 *blank ")" /
 //        function /
@@ -3024,44 +3024,24 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 		if !p.accept(tokenCClose) {
 			m = make([][]expr, 0, 16)
 			for {
-				pair := []expr{nil, nil}
-				p.acceptBlanks()
-				t1 := p.next()
-				p.acceptBlanks()
-				t2 := p.next()
-				// TODO { [expr] : expr }
-				if p.canBeIdentifier(t1) && t2.typ == tokenColon {
-					pair[0] = node.NewPosNode(t1.pos, &identifierNode{t1.val, false})
-					p.acceptBlanks()
-					right, err := p.acceptExpr1()
-					if err != nil {
-						return nil, err
-					}
-					pair[1] = right
-				} else {
-					p.backup(t2)
-					p.backup(t1)
-					left, err := p.acceptExpr1()
-					if err != nil {
-						return nil, err
-					}
-					p.acceptBlanks()
-					if !p.accept(tokenColon) {
-						return nil, p.errorf(
-							"expected %s but got %s",
-							tokenName(tokenColon),
-							tokenName(p.peek().typ),
-						)
-					}
-					p.acceptBlanks()
-					right, err := p.acceptExpr1()
-					if err != nil {
-						return nil, err
-					}
-					pair[0] = left
-					pair[1] = right
+				left, err := p.acceptExpr1()
+				if err != nil {
+					return nil, err
 				}
-				m = append(m, pair)
+				p.acceptBlanks()
+				if !p.accept(tokenColon) {
+					return nil, p.errorf(
+						"expected %s but got %s",
+						tokenName(tokenColon),
+						tokenName(p.peek().typ),
+					)
+				}
+				p.acceptBlanks()
+				right, err := p.acceptExpr1()
+				if err != nil {
+					return nil, err
+				}
+				m = append(m, []expr{left, right})
 				p.acceptBlanks()
 				if p.accept(tokenComma) {
 					p.acceptBlanks()

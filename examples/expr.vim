@@ -38,7 +38,6 @@ scriptencoding utf-8
 [1,[2,[3]]]
 {}
 {'key':'value'}
-{'key':'value'}
 let foo = {}
 foo.bar
 let bar = ''
@@ -58,4 +57,3 @@ let [begin,end] = [1,2]
 arr[begin:end]
 arr[null:end]
 arr[begin:null]
-{'from':'reserved word becomes key'}

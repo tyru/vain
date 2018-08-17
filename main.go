@@ -34,7 +34,6 @@ func main() {
 }
 
 func usage() {
-	// TODO
 	fmt.Print(`
 Usage: vain COMMAND ARGS
 

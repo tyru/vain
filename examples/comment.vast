@@ -50,4 +50,4 @@
 (const 'obj (dict))
 (dot 'obj 'prop)
 (list 1 2 3)
-(dict ('key "value") ('k1 42))
+(dict ("key" "value") ("k1" 42))

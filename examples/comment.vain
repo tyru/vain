@@ -151,9 +151,9 @@ obj.
 ]
 {
   # this is important pair
-  key : 'value',
+  'key' : 'value',
   # comment
-  k1 # comment
+  'k1' # comment
   # comment
   : # comment
   # comment
