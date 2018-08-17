@@ -53,7 +53,7 @@
 (slice 'arr 0 1)
 (slice 'arr null 1)
 (slice 'arr 0 null)
-(const ('begin 'end) (list 1 2))
+(const (list 'begin 'end) (list 1 2))
 (slice 'arr 'begin 'end)
 (slice 'arr null 'end)
 (slice 'arr 'begin null)

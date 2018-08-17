@@ -287,26 +287,12 @@ func (d *dumper) newAssignStatementReader(node assignStatement, level int, opstr
 	buf.WriteString("(")
 	buf.WriteString(opstr)
 	buf.WriteString(" ")
-	if list, ok := node.Left().TerminalNode().(*listNode); ok { // Destructuring
-		buf.WriteString("(")
-		for i := range list.value {
-			if i > 0 {
-				buf.WriteString(" ")
-			}
-			_, err := io.Copy(&buf, d.toReader(list.value[i], level))
-			if err != nil {
-				return d.err(err, list.value[i])
-			}
-		}
-		buf.WriteString(")")
-	} else {
-		_, err := io.Copy(&buf, d.toReader(node.Left(), level))
-		if err != nil {
-			return d.err(err, node.Left())
-		}
+	_, err := io.Copy(&buf, d.toReader(node.Left(), level))
+	if err != nil {
+		return d.err(err, node.Left())
 	}
 	buf.WriteString(" ")
-	_, err := io.Copy(&buf, d.toReader(node.Right(), level))
+	_, err = io.Copy(&buf, d.toReader(node.Right(), level))
 	if err != nil {
 		return d.err(err, node.Right())
 	}
@@ -397,26 +383,12 @@ func (d *dumper) newWhileStatementReader(node *whileStatement, level int) io.Rea
 
 func (d *dumper) newForStatementReader(node *forStatement, level int) io.Reader {
 	var left bytes.Buffer
-	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
-		left.WriteString("(")
-		for i := range list.value {
-			if i > 0 {
-				left.WriteString(" ")
-			}
-			_, err := io.Copy(&left, d.toReader(list.value[i], level))
-			if err != nil {
-				return d.err(err, list.value[i])
-			}
-		}
-		left.WriteString(")")
-	} else {
-		_, err := io.Copy(&left, d.toReader(node.left, level))
-		if err != nil {
-			return d.err(err, node.left)
-		}
+	_, err := io.Copy(&left, d.toReader(node.left, level))
+	if err != nil {
+		return d.err(err, node.left)
 	}
 	var right bytes.Buffer
-	_, err := io.Copy(&right, d.toReader(node.right, level))
+	_, err = io.Copy(&right, d.toReader(node.right, level))
 	if err != nil {
 		return d.err(err, node.right)
 	}
