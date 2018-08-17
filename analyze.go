@@ -494,6 +494,8 @@ func convertVariableNames(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, 
 	return n, nil
 }
 
+// TODO shadowing
+// TODO use scope
 func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 	nr := 0
 	for i := range body {
