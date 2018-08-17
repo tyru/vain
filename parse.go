@@ -135,6 +135,26 @@ func (p *parser) acceptIdentifierLike() bool {
 	return false
 }
 
+// identifierLike := identifier | <value matches with '^\h\w*$'>
+func (p *parser) canBeIdentifier(t *token) bool {
+	if t.typ == tokenIdentifier {
+		return true
+	}
+	if len(t.val) == 0 {
+		return false
+	}
+	val := []rune(t.val)
+	if !isWordHead(val[0]) {
+		return false
+	}
+	for _, r := range val[1:] {
+		if !isAlphaNumeric(r) {
+			return false
+		}
+	}
+	return true
+}
+
 type topLevelNode struct {
 	body []node.Node
 }
@@ -2653,7 +2673,7 @@ func (n *identifierNode) IsExpr() bool {
 
 // expr8 := expr9 1*( "[" *blank expr1 *blank "]" ) /
 //          expr9 1*( "[" *blank [ expr1 *blank ] ":" *blank [ expr1 *blank ] "]" ) /
-//          expr9 1*( "." *blank identifier ) /
+//          expr9 1*( "." *blank identifierLike ) /
 //          expr9 1*( "(" *blank [ expr1 *blank *( "," *blank expr1 *blank) [ "," ] ] *blank ")" ) /
 //          expr9
 func (p *parser) acceptExpr8() (expr, *node.ErrorNode) {
@@ -2755,7 +2775,7 @@ func (p *parser) acceptExpr8() (expr, *node.ErrorNode) {
 		} else if p.accept(tokenDot) {
 			dot := p.token
 			p.acceptBlanks()
-			if !p.accept(tokenIdentifier) {
+			if !p.acceptIdentifierLike() {
 				return nil, p.errorf(
 					"expected %s but got %s",
 					tokenName(tokenIdentifier),
@@ -3085,24 +3105,4 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 		return n, nil
 	}
 	return nil, p.errorf("expected expression but got %s", tokenName(p.peek().typ))
-}
-
-// identifierLike := identifier | <value matches with '^\h\w*$'>
-func (p *parser) canBeIdentifier(t *token) bool {
-	if t.typ == tokenIdentifier {
-		return true
-	}
-	if len(t.val) == 0 {
-		return false
-	}
-	val := []rune(t.val)
-	if !isWordHead(val[0]) {
-		return false
-	}
-	for _, r := range val[1:] {
-		if !isAlphaNumeric(r) {
-			return false
-		}
-	}
-	return true
 }

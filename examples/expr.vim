@@ -40,11 +40,13 @@ scriptencoding utf-8
 {'key':'value'}
 let foo = {}
 foo.bar
+foo.from
 let bar = ''
 foo[bar]
 foo["bar"]
 call foo()
 call foo.bar()
+call foo.from()
 call foo[bar]()
 call foo["bar"]()
 call foo.bar.baz()
