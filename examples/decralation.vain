@@ -15,10 +15,13 @@ func f() {
   const [_, bar, _] = [1,2,3]
   const [_, _, baz] = [1,2,3]
   const [_unused1] = [1]
+  const _unused2 = 2
   while 42 {
-    let foo = 123
+    let [l, _] = [123, 456]
+    let [_, r] = [123, 456]
     if 42 {
-      let bar = 456
+      let [l, _] = [123, 456]
+      let [_, r] = [123, 456]
     }
   }
 }
@@ -28,8 +31,14 @@ func g() {
 
   func inner() {
     const foo = 42
-    if 42 {
-      let foo = 123
+    const [_, bar, _] = [1,2,3]
+    while 42 {
+      let [l, _] = [123, 456]
+      let [_, r] = [123, 456]
+      if 42 {
+        let [l, _] = [123, 456]
+        let [_, r] = [123, 456]
+      }
     }
   }
 }

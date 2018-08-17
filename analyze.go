@@ -504,9 +504,6 @@ func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 				ctrl.dontFollowInner()
 				return n
 			case assignStatement:
-				if !nn.HasUnderscore() {
-					return n
-				}
 				as = nn
 			default:
 				return n
