@@ -88,9 +88,11 @@ func (t *translator) toReader(node, parent node.Node) io.Reader {
 	case *returnStatement:
 		return t.newReturnNodeReader(n, parent)
 	case *constStatement:
-		return t.newConstStatementReader(n, parent)
-	case *letStatement:
-		return t.newLetStatementReader(n, parent)
+		return t.newAssignStatementReader(n, parent)
+	case *letDeclareStatement:
+		return t.newLetDeclareStatementReader(n, parent)
+	case *letAssignStatement:
+		return t.newAssignStatementReader(n, parent)
 	case *ifStatement:
 		return t.newIfStatementReader(n, parent, true)
 	case *whileStatement:
@@ -279,7 +281,10 @@ func (t *translator) newFuncStmtReader(f *funcStmtOrExpr) io.Reader {
 		if i > 0 {
 			buf.WriteString(",")
 		}
-		buf.WriteString(f.args[i].name)
+		_, err := io.Copy(&buf, t.toExcmd(f.args[i].left, f))
+		if err != nil {
+			return t.err(err, f.args[i].left)
+		}
 	}
 	buf.WriteString(")")
 	if len(vimmods) > 0 {
@@ -309,7 +314,10 @@ func (t *translator) newLambdaReader(f *funcStmtOrExpr, parent node.Node) io.Rea
 		if i > 0 {
 			buf.WriteString(",")
 		}
-		buf.WriteString(f.args[i].name)
+		_, err := io.Copy(&buf, t.toExcmd(f.args[i].left, f))
+		if err != nil {
+			return t.err(err, f.args[i].left)
+		}
 	}
 	buf.WriteString("->")
 	_, err := io.Copy(&buf, t.toReader(f.body[0], parent))
@@ -478,42 +486,10 @@ func (t *translator) newReturnNodeReader(node *returnStatement, parent node.Node
 	return strings.NewReader(s)
 }
 
-func (t *translator) newConstStatementReader(node *constStatement, parent node.Node) io.Reader {
-	var left bytes.Buffer
-	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
-		left.WriteString("[")
-		for i := range list.value {
-			if i > 0 {
-				left.WriteString(",")
-			}
-			_, err := io.Copy(&left, t.toReader(list.value[i], parent))
-			if err != nil {
-				return t.err(err, list.value[i])
-			}
-		}
-		left.WriteString("]")
-	} else {
-		_, err := io.Copy(&left, t.toReader(node.left, parent))
-		if err != nil {
-			return t.err(err, node.left)
-		}
-	}
-	var right bytes.Buffer
-	_, err := io.Copy(&right, t.toReader(node.right, parent))
-	if err != nil {
-		return t.err(err, node.right)
-	}
-	s := fmt.Sprintf("let %s = %s", left.String(), right.String())
-	return strings.NewReader(s)
-}
-
-func (t *translator) newLetStatementReader(node *letStatement, parent node.Node) io.Reader {
-	if node.right == nil {
-		return emptyReader // TODO
-	}
+func (t *translator) newAssignStatementReader(node assignStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("let ")
-	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
+	if list, ok := node.Left().TerminalNode().(*listNode); ok { // Destructuring
 		buf.WriteString("[")
 		for i := range list.value {
 			if i > 0 {
@@ -526,17 +502,21 @@ func (t *translator) newLetStatementReader(node *letStatement, parent node.Node)
 		}
 		buf.WriteString("]")
 	} else {
-		_, err := io.Copy(&buf, t.toReader(node.left, parent))
+		_, err := io.Copy(&buf, t.toReader(node.Left(), parent))
 		if err != nil {
-			return t.err(err, node.left)
+			return t.err(err, node.Left())
 		}
 	}
 	buf.WriteString(" = ")
-	_, err := io.Copy(&buf, t.toReader(node.right, parent))
+	_, err := io.Copy(&buf, t.toReader(node.Right(), parent))
 	if err != nil {
-		return t.err(err, node.right)
+		return t.err(err, node.Right())
 	}
 	return strings.NewReader(buf.String())
+}
+
+func (t *translator) newLetDeclareStatementReader(node *letDeclareStatement, parent node.Node) io.Reader {
+	return emptyReader // TODO
 }
 
 func (t *translator) newTernaryNodeReader(node *ternaryNode, parent node.Node) io.Reader {
@@ -880,18 +860,20 @@ func (t *translator) toExcmd(n, parent node.Node) io.Reader {
 }
 
 func (t *translator) isVoidExpr(n, parent node.Node) bool {
-	switch parent.(type) {
-	case *topLevelNode:
-	case *funcStmtOrExpr:
-	default:
-		return false
-	}
-	if f, ok := n.(*funcStmtOrExpr); ok {
-		return t.isVoidExprFunc(f, parent)
-	} else if !n.IsExpr() {
-		return false
-	} else if _, ok := n.(*callNode); ok {
-		return false
-	}
-	return true
+	// TODO Do this in analyzer.
+	return false
+	// switch parent.(type) {
+	// case *topLevelNode:
+	// case *funcStmtOrExpr:
+	// default:
+	// 	return false
+	// }
+	// if f, ok := n.(*funcStmtOrExpr); ok {
+	// 	return t.isVoidExprFunc(f, parent)
+	// } else if !n.IsExpr() {
+	// 	return false
+	// } else if _, ok := n.TerminalNode().(*callNode); ok {
+	// 	return false
+	// }
+	// return true
 }

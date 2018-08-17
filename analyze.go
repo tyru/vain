@@ -46,9 +46,11 @@ func (a *analyzer) enabled(name string) bool {
 }
 
 const (
-	toplevelReturn              = "toplevel-return"
-	undeclaredVariable          = "undeclared-variable"
-	duplicateDeclaration        = "duplicate-declaration"
+	toplevelReturn       = "toplevel-return"
+	undeclaredVariable   = "undeclared-variable"
+	duplicateDeclaration = "duplicate-declaration"
+	// XXX maybe this is unnecessary, because the parser doesn't allow
+	// tokenUnderscore as variable name.
 	underscoreVariableReference = "underscore-variable-reference"
 )
 
@@ -264,6 +266,9 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 	errs := make([]node.ErrorNode, 0, 4)
 	scope.push()
 	for i := range body {
+		if _, ok := body[i].TerminalNode().(*funcStmtOrExpr); ok {
+			continue // Skip another function
+		}
 		if vs := a.getDeclaredVars(body[i]); len(vs) > 0 { // Found declaration.
 			for i := range vs {
 				var id *identifierNode
@@ -296,7 +301,7 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 		}
 		vs, e := a.getReferenceVars(body[i])
 		errs = append(errs, e...)
-		if len(vs) > 0 { // Found referenced variables.
+		if len(vs) > 0 { // Found reference variables.
 			for i := range vs {
 				var id *identifierNode
 				if nn, ok := vs[i].TerminalNode().(*identifierNode); ok {
@@ -304,7 +309,7 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 				} else {
 					continue
 				}
-				if v := scope.getOuterVar(id.value); v == nil && a.enabled(undeclaredVariable) {
+				if scope.getOuterVar(id.value) == nil && a.enabled(undeclaredVariable) {
 					err := a.err(
 						errors.New("undefined: "+id.value),
 						vs[i],
@@ -335,28 +340,31 @@ func (a *analyzer) checkInnerBlock(n node.Node, scope *scope) []node.ErrorNode {
 // Returned nodes also have a position (node.Position() != nil)
 // if original node has a position.
 func (a *analyzer) getDeclaredVars(n node.Node) []node.Node {
-	var left node.Node
 	switch nn := n.TerminalNode().(type) {
-	case *constStatement:
-		left = nn.left
-	case *letStatement:
-		left = nn.left
-	case *forStatement:
-		left = nn.left
-	default:
-		return nil
-	}
-	switch nn := left.TerminalNode().(type) {
-	case *listNode:
-		vars := make([]node.Node, 0, len(nn.value))
-		for i := range nn.value {
-			if _, ok := nn.value[i].TerminalNode().(*identifierNode); ok {
-				vars = append(vars, nn.value[i])
+	case assignStatement:
+		switch nnn := nn.Left().TerminalNode().(type) {
+		case *listNode:
+			vars := make([]node.Node, 0, len(nnn.value))
+			for i := range nnn.value {
+				if _, ok := nnn.value[i].TerminalNode().(*identifierNode); ok {
+					vars = append(vars, nnn.value[i])
+				}
+			}
+			return vars
+		case *identifierNode:
+			return []node.Node{nn.Left()}
+		default:
+			return nil
+		}
+	case *letDeclareStatement:
+		vars := make([]node.Node, 0, len(nn.left))
+		for i := range nn.left {
+			arg := nn.left[i]
+			if _, ok := arg.left.TerminalNode().(*identifierNode); ok {
+				vars = append(vars, arg.left)
 			}
 		}
 		return vars
-	case *identifierNode:
-		return []node.Node{left}
 	default:
 		return nil
 	}
@@ -371,13 +379,12 @@ func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode)
 	declroutes := make([][]int, 0, 8)
 	walkNode(n, func(ctrl *walkCtrl, n node.Node) node.Node {
 		switch nn := n.TerminalNode().(type) {
-		case *constStatement:
+		case *funcStmtOrExpr:
+			ctrl.dontFollowInner() // skip another function (expression).
+		case assignStatement:
 			lhs := append(ctrl.route(), 0)
 			declroutes = append(declroutes, lhs)
-		case *letStatement:
-			lhs := append(ctrl.route(), 0)
-			declroutes = append(declroutes, lhs)
-		case *forStatement:
+		case *letDeclareStatement:
 			lhs := append(ctrl.route(), 0)
 			declroutes = append(declroutes, lhs)
 		case *identifierNode:
@@ -540,9 +547,12 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 	case *funcStmtOrExpr:
 		ctrl.push(0)
 		for i := range nn.args {
+			ctrl.push(i)
+			nn.args[i].left = ctrl.walk(nn.args[i].left, 0, f)
 			if nn.args[i].defaultVal != nil {
-				nn.args[i].defaultVal = ctrl.walk(nn.args[i].defaultVal, i, f)
+				nn.args[i].defaultVal = ctrl.walk(nn.args[i].defaultVal, 1, f)
 			}
+			ctrl.pop()
 		}
 		ctrl.pop()
 		ctrl.push(1)
@@ -555,7 +565,13 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 	case *constStatement:
 		nn.left = ctrl.walk(nn.left, 0, f)
 		nn.right = ctrl.walk(nn.right, 1, f)
-	case *letStatement:
+	case *letDeclareStatement:
+		ctrl.push(0)
+		for i := range nn.left {
+			nn.left[i].left = ctrl.walk(nn.left[i].left, i, f)
+		}
+		ctrl.pop()
+	case *letAssignStatement:
 		nn.left = ctrl.walk(nn.left, 0, f)
 		nn.right = ctrl.walk(nn.right, 1, f)
 	case *ifStatement:

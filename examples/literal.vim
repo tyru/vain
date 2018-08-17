@@ -1,22 +1,22 @@
 scriptencoding utf-8
-" 42
-" "string"
-" 'str''ing'
-" "hel'lo"
-" 'hel\nlo'
-" "\b\e\f\n\r\t"
-" "\x01"
-" "\x2"
-" "\x"
-" "\u0001"
-" "\u002"
-" "\u03"
-" "\u4"
-" "\u"
-" &autoindent
-" &g:autoindent
-" &l:autoindent
-" $VAR
-" @a
-" @"
-" @
+42
+"string"
+'str''ing'
+"hel'lo"
+'hel\nlo'
+"\b\e\f\n\r\t"
+"\x01"
+"\x2"
+"\x"
+"\u0001"
+"\u002"
+"\u03"
+"\u4"
+"\u"
+&autoindent
+&g:autoindent
+&l:autoindent
+$VAR
+@a
+@"
+@

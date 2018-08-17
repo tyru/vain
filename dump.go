@@ -69,9 +69,11 @@ func (d *dumper) toReader(node node.Node, level int) io.Reader {
 	case *returnStatement:
 		return d.newReturnNodeReader(n, level)
 	case *constStatement:
-		return d.newConstStatementReader(n, level)
-	case *letStatement:
-		return d.newLetStatementReader(n, level)
+		return d.newAssignStatementReader(n, level, "const")
+	case *letDeclareStatement:
+		return d.newLetDeclareStatementReader(n, level)
+	case *letAssignStatement:
+		return d.newAssignStatementReader(n, level, "let")
 	case *ifStatement:
 		return d.newIfStatementReader(n, level)
 	case *whileStatement:
@@ -214,15 +216,20 @@ func (d *dumper) newFuncReader(f *funcStmtOrExpr, level int) io.Reader {
 	args := make([]string, 0, len(f.args))
 	for i := range f.args {
 		arg := f.args[i]
+		var left bytes.Buffer
+		_, err := io.Copy(&left, d.toReader(arg.left, level+1))
+		if err != nil {
+			return d.err(err, arg.left)
+		}
 		if arg.typ != "" {
-			args = append(args, fmt.Sprintf("(%s : %s)", arg.name, arg.typ))
+			args = append(args, fmt.Sprintf("(%s : %s)", left.String(), arg.typ))
 		} else {
 			var buf bytes.Buffer
 			_, err := io.Copy(&buf, d.toReader(arg.defaultVal, level+1))
 			if err != nil {
 				return d.err(err, f)
 			}
-			args = append(args, fmt.Sprintf("(%s = %s)", arg.name, buf.String()))
+			args = append(args, fmt.Sprintf("(%s = %s)", left.String(), buf.String()))
 		}
 	}
 	bodyList := make([]string, 0, len(f.body))
@@ -274,39 +281,12 @@ func (d *dumper) newReturnNodeReader(node *returnStatement, level int) io.Reader
 	return strings.NewReader(s)
 }
 
-func (d *dumper) newConstStatementReader(node *constStatement, level int) io.Reader {
-	var left bytes.Buffer
-	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
-		left.WriteString("(")
-		for i := range list.value {
-			if i > 0 {
-				left.WriteString(" ")
-			}
-			_, err := io.Copy(&left, d.toReader(list.value[i], level))
-			if err != nil {
-				return d.err(err, list.value[i])
-			}
-		}
-		left.WriteString(")")
-	} else {
-		_, err := io.Copy(&left, d.toReader(node.left, level))
-		if err != nil {
-			return d.err(err, node.left)
-		}
-	}
-	var right bytes.Buffer
-	_, err := io.Copy(&right, d.toReader(node.right, level))
-	if err != nil {
-		return d.err(err, node.right)
-	}
-	s := fmt.Sprintf("(const %s %s)", left.String(), right.String())
-	return strings.NewReader(s)
-}
-
-func (d *dumper) newLetStatementReader(node *letStatement, level int) io.Reader {
+func (d *dumper) newAssignStatementReader(node assignStatement, level int, opstr string) io.Reader {
 	var buf bytes.Buffer
-	buf.WriteString("(let ")
-	if list, ok := node.left.TerminalNode().(*listNode); ok { // Destructuring
+	buf.WriteString("(")
+	buf.WriteString(opstr)
+	buf.WriteString(" ")
+	if list, ok := node.Left().TerminalNode().(*listNode); ok { // Destructuring
 		buf.WriteString("(")
 		for i := range list.value {
 			if i > 0 {
@@ -319,19 +299,44 @@ func (d *dumper) newLetStatementReader(node *letStatement, level int) io.Reader 
 		}
 		buf.WriteString(")")
 	} else {
-		_, err := io.Copy(&buf, d.toReader(node.left, level))
+		_, err := io.Copy(&buf, d.toReader(node.Left(), level))
 		if err != nil {
-			return d.err(err, node.left)
+			return d.err(err, node.Left())
 		}
 	}
-	if node.right != nil {
-		buf.WriteString(" ")
-		_, err := io.Copy(&buf, d.toReader(node.right, level))
-		if err != nil {
-			return d.err(err, node.right)
-		}
+	buf.WriteString(" ")
+	_, err := io.Copy(&buf, d.toReader(node.Right(), level))
+	if err != nil {
+		return d.err(err, node.Right())
 	}
 	buf.WriteString(")")
+	return strings.NewReader(buf.String())
+}
+
+func (d *dumper) newLetDeclareStatementReader(node *letDeclareStatement, level int) io.Reader {
+	var buf bytes.Buffer
+	buf.WriteString("(let (")
+	for i := range node.left {
+		arg := node.left[i]
+		buf.WriteString("(")
+		_, err := io.Copy(&buf, d.toReader(arg.left, level))
+		if err != nil {
+			return d.err(err, arg.left)
+		}
+		if arg.typ != "" {
+			buf.WriteString(" : ")
+			buf.WriteString(arg.typ)
+			buf.WriteString(")")
+		} else {
+			buf.WriteString(" = ")
+			_, err := io.Copy(&buf, d.toReader(arg.defaultVal, level+1))
+			if err != nil {
+				return d.err(err, node)
+			}
+			buf.WriteString(")")
+		}
+	}
+	buf.WriteString("))")
 	return strings.NewReader(buf.String())
 }
 

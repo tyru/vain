@@ -13,3 +13,5 @@
 # let foo
 # let foo
 
+# const echo = func(msg:String){}
+# echo(_)

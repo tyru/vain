@@ -1,7 +1,7 @@
 # top level
 const foo = 42
 let bar = 1
-let baz
+let baz: Int
 if 42 {
   let foo = 123  # this is not duplicate variable (shadowing)
   if 42 {

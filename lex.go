@@ -241,6 +241,10 @@ func tokenName(typ tokenType) string {
 		return "\"for\""
 	case tokenIn:
 		return "\"in\""
+	case tokenComment:
+		return "comment"
+	case tokenUnderscore:
+		return "underscore"
 	}
 	return ""
 }
