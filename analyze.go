@@ -10,31 +10,50 @@ import (
 
 func analyze(name string, inNodes <-chan node.Node) *analyzer {
 	// TODO Give policies by argument?
-	// But some rules are required to emit "correct" vim script intermediate code.
+	// But some ruleMap are required to emit "correct" vim script intermediate code.
 	policies := defaultPolicies
-	checkers := make([]checkFn, 0, len(ruleChecker))
-	added := make(map[string]bool, len(ruleChecker))
-	for name, checker := range ruleChecker {
-		if policies[name] && !added[name] {
-			checkers = append(checkers, checker)
-			added[name] = true
+
+	// 0: unused, 1: checker, 2: converter
+	funcs := make([]int, len(walkFuncs))
+	var checkNum, converterNum int
+	for name, rule := range ruleMap {
+		if policies[name] {
+			if rule.isChecker {
+				funcs[rule.funcID] = 1
+				checkNum++
+			} else {
+				funcs[rule.funcID] = 2
+				converterNum++
+			}
+		}
+	}
+	checkers := make([]multiWalkFn, 0, checkNum)
+	converters := make([]multiWalkFn, 0, converterNum)
+	for id := range funcs {
+		switch id {
+		case 1:
+			checkers = append(checkers, walkFuncs[id])
+		case 2:
+			converters = append(converters, walkFuncs[id])
 		}
 	}
 	return &analyzer{
 		name,
 		inNodes,
 		make(chan node.Node, 1),
-		newSeriesChecker(checkers...),
+		newMultiWalker(checkers...),
+		newMultiWalker(converters...),
 		policies,
 	}
 }
 
 type analyzer struct {
-	name     string
-	inNodes  <-chan node.Node
-	outNodes chan node.Node
-	checker  *seriesChecker
-	policies map[string]bool
+	name       string
+	inNodes    <-chan node.Node
+	outNodes   chan node.Node
+	checkers   *multiWalker
+	converters *multiWalker
+	policies   map[string]bool
 }
 
 func (a *analyzer) Nodes() <-chan node.Node {
@@ -52,47 +71,77 @@ const (
 	// XXX maybe this is unnecessary, because the parser doesn't allow
 	// tokenUnderscore as variable name.
 	underscoreVariableReference = "underscore-variable-reference"
+	convertUnderscoreVariable   = "convert-underscore-variable"
 )
+
+var walkFuncs = []multiWalkFn{
+	checkToplevelReturn,
+	checkVariable,
+	convertVariableNames,
+}
 
 func init() {
 	def := []struct {
-		name    string
-		check   checkFn
-		enabled bool
+		name        string
+		funcID      int
+		isChecker   bool
+		isConverter bool
+		enabled     bool
 	}{
 		{
 			toplevelReturn,
-			checkToplevelReturn,
+			0,
+			true,
+			false,
 			true,
 		},
 		{
 			undeclaredVariable,
-			checkVariable,
+			1,
+			true,
+			false,
 			true,
 		},
 		{
 			duplicateDeclaration,
-			checkVariable,
+			1,
+			true,
+			false,
 			true,
 		},
 		{
 			underscoreVariableReference,
-			checkVariable,
+			1,
+			true,
+			false,
+			true,
+		},
+		{
+			convertUnderscoreVariable,
+			2,
+			false,
+			true,
 			true,
 		},
 	}
 	defaultPolicies = make(map[string]bool, len(def))
-	ruleChecker = make(map[string]checkFn, len(def))
+	ruleMap = make(map[string]rule, len(def))
 	for i := range def {
 		defaultPolicies[def[i].name] = def[i].enabled
-		ruleChecker[def[i].name] = def[i].check
+		ruleMap[def[i].name] = rule{def[i].funcID, def[i].isChecker, def[i].isConverter}
 	}
 }
 
-type checkFn func(*analyzer, *walkCtrl, *typedNode) []node.ErrorNode
+type multiWalkFn func(*analyzer, *walkCtrl, node.Node) (node.Node, []node.ErrorNode)
 
 var defaultPolicies map[string]bool
-var ruleChecker map[string]checkFn
+var ruleMap map[string]rule
+
+type rule struct {
+	funcID      int  // The index number of walkFuncs.
+	isChecker   bool // If true, this is checker function.
+	isConverter bool // If true, this is converter function.
+}
 
 type typedNode struct {
 	node.Node
@@ -109,15 +158,15 @@ func (n *typedNode) Clone() node.Node {
 
 func (a *analyzer) Run() {
 	for n := range a.inNodes {
-		if _, ok := n.TerminalNode().(*topLevelNode); ok {
-			top, errs := a.analyze(n)
+		if top, ok := n.TerminalNode().(*topLevelNode); ok {
+			result, errs := a.analyze(top)
 			if len(errs) > 0 {
 				for i := range errs {
 					a.emit(&errs[i]) // type error, and so on
 				}
 				continue
 			}
-			a.emit(top)
+			a.emit(result)
 		} else if e, ok := n.TerminalNode().(*node.ErrorNode); ok {
 			a.emit(e) // parse error
 		} else {
@@ -146,43 +195,44 @@ func (a *analyzer) err(err error, n node.Node) *node.ErrorNode {
 	)
 }
 
-func (a *analyzer) analyze(top node.Node) (node.Node, []node.ErrorNode) {
+func (a *analyzer) analyze(top *topLevelNode) (node.Node, []node.ErrorNode) {
+	// Perform semantics checks.
+	errs := a.check(top)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+
 	// Infer type (convert the node to *typedNode).
 	tNode, errs := a.infer(top)
 	if len(errs) > 0 {
 		return nil, errs
 	}
 
-	// Perform semantics checks.
-	errs = a.check(tNode)
+	// Convert node.
+	tNode, errs = a.convert(tNode)
 	if len(errs) > 0 {
 		return nil, errs
 	}
 
-	// Convert node.
-	tNode = a.convertPre(tNode)
-
 	// Convert *typedNode to node.
-	top, ok := a.convertPost(tNode).TerminalNode().(*topLevelNode)
-	if !ok {
-		err := a.err(
-			fmt.Errorf("fatal: topLevelNode is needed at top level (%+v)", top),
-			top,
-		)
+	top, err := a.unwrapNode(tNode)
+	if err != nil {
 		return nil, []node.ErrorNode{*err}
 	}
 
-	return top, errs
+	return top, nil
 }
 
 // check checks the semantic errors.
-func (a *analyzer) check(tNode *typedNode) []node.ErrorNode {
+// The checker functions don't change the node.
+// it only checks the nodes before infering the types.
+// TODO Run each check functions concurrently:
+// Pool goroutines to process the checks and run them in the goroutines.
+func (a *analyzer) check(top *topLevelNode) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 16)
-	walkNode(tNode, func(ctrl *walkCtrl, n node.Node) node.Node {
-		tNode := n.(*typedNode) // NOTE: Given node must be *typedNode.
-		// TODO Run each check functions concurrently:
-		// Pool goroutines to process the checks and run them in the goroutines.
-		errs = append(errs, a.checker.check(a, ctrl, tNode)...)
+	walkNode(top, func(ctrl *walkCtrl, n node.Node) node.Node {
+		_, e := a.checkers.walk(a, ctrl, n)
+		errs = append(errs, e...)
 		return n
 	})
 	return errs
@@ -190,24 +240,24 @@ func (a *analyzer) check(tNode *typedNode) []node.ErrorNode {
 
 // checkToplevelReturn checks if returnStatement exists under topLevelNode.
 // It doesn't check inside expression and function.
-func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []node.ErrorNode {
-	if tNode.IsExpr() {
+func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, []node.ErrorNode) {
+	if n.IsExpr() {
 		ctrl.dontFollowInner()
-		return nil
+		return n, nil
 	}
-	n := tNode.TerminalNode()
-	if _, ok := n.(*funcStmtOrExpr); ok {
+	switch n.TerminalNode().(type) {
+	case *funcStmtOrExpr:
 		ctrl.dontFollowInner()
-		return nil
-	}
-	if _, ok := n.(*returnStatement); ok {
+		return n, nil
+	case *returnStatement:
 		err := a.err(
 			errors.New("return statement found at top level"),
-			tNode,
+			n,
 		)
-		return []node.ErrorNode{*err}
+		return n, []node.ErrorNode{*err}
+	default:
+		return n, nil
 	}
-	return nil
 }
 
 func newScope() *scope {
@@ -250,14 +300,14 @@ func (s *scope) addVar(id *identifierNode) {
 //   * Duplicate variable decralations exist.
 // * underscore-variable-reference
 //   * Underscore identifier ("_") is used for the variable which is referenced.
-func checkVariable(a *analyzer, _ *walkCtrl, tNode *typedNode) []node.ErrorNode {
-	switch nn := tNode.TerminalNode().(type) {
+func checkVariable(a *analyzer, _ *walkCtrl, n node.Node) (node.Node, []node.ErrorNode) {
+	switch nn := n.TerminalNode().(type) {
 	case *topLevelNode:
-		return a.checkVariable(nn.body, newScope())
+		return n, a.checkVariable(nn.body, newScope())
 	case *funcStmtOrExpr:
-		return a.checkVariable(nn.body, newScope())
+		return n, a.checkVariable(nn.body, newScope())
 	default:
-		return nil
+		return n, nil
 	}
 }
 
@@ -409,46 +459,70 @@ func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode)
 	return ids, errs
 }
 
-// convertPre converts some specific nodes.
-// convertPre *does not* change n inplacely.
+// convert converts some specific nodes.
+// convert *does not* change n inplacely.
 // It clones the node, convert, and return it.
-func (a *analyzer) convertPre(tNode *typedNode) *typedNode {
-	if top, ok := tNode.TerminalNode().Clone().(*topLevelNode); ok {
-		top.body = a.convertVariableNames(top.body)
-		tNode = &typedNode{top, ""}
+func (a *analyzer) convert(tNode *typedNode) (*typedNode, []node.ErrorNode) {
+	tNode = tNode.Clone().(*typedNode)
+	errs := make([]node.ErrorNode, 0, 16)
+	tNode, ok := walkNode(tNode, func(ctrl *walkCtrl, n node.Node) node.Node {
+		n, e := a.converters.walk(a, ctrl, n)
+		errs = append(errs, e...)
+		return n
+	}).(*typedNode)
+	if !ok {
+		err := a.err(
+			fmt.Errorf("fatal: convert(): typedNode is required after convert (node = %+v)", tNode),
+			tNode,
+		)
+		return tNode, []node.ErrorNode{*err}
 	}
-	return tNode
+	return tNode, errs
 }
 
-// convertUnderscore converts variable name in the scope of body.
+// convertVariableNames converts variable names in the scope of body.
 // For example, "_varname" -> "__varname", "_" -> "_unused{nr}".
-func (a *analyzer) convertVariableNames(body []node.Node) []node.Node {
+func convertVariableNames(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, []node.ErrorNode) {
+	switch nn := n.TerminalNode().(type) {
+	case *topLevelNode:
+		a.convertVariableNames(nn.body, newScope())
+	case *funcStmtOrExpr:
+		a.convertVariableNames(nn.body, newScope())
+	default:
+		return n, nil
+	}
+	return n, nil
+}
+
+func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 	nr := 0
-	newbody := make([]node.Node, 0, len(body))
 	for i := range body {
-		b := walkNode(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
-			if f, ok := n.TerminalNode().(*funcStmtOrExpr); ok {
-				f.body = a.convertVariableNames(f.body)
+		body[i] = walkNode(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
+			var as assignStatement
+			switch nn := n.TerminalNode().(type) {
+			case *funcStmtOrExpr:
 				ctrl.dontFollowInner()
-				return f
-			}
-			var con *constStatement
-			if c, ok := n.TerminalNode().(*constStatement); ok {
-				con = c
-			} else {
 				return n
-			}
-			if !con.hasUnderscore {
+			case assignStatement:
+				if !nn.HasUnderscore() {
+					return n
+				}
+				as = nn
+			default:
 				return n
 			}
 			var ids []*identifierNode
-			if l, ok := con.left.TerminalNode().(*listNode); ok { // Destructuring
-				for i := range l.value {
-					if id, ok := l.value[i].TerminalNode().(*identifierNode); ok {
+			switch nn := as.Left().TerminalNode().(type) {
+			case *listNode: // Destructuring
+				ids = make([]*identifierNode, 0, len(nn.value))
+				for i := range nn.value {
+					if id, ok := nn.value[i].TerminalNode().(*identifierNode); ok {
 						ids = append(ids, id)
 					}
 				}
-			} else {
+			case *identifierNode:
+				ids = []*identifierNode{nn}
+			default:
 				return n
 			}
 			for i := range ids {
@@ -462,27 +536,32 @@ func (a *analyzer) convertVariableNames(body []node.Node) []node.Node {
 					nr++
 				}
 			}
-			return con
+			return n
 		})
-		newbody = append(newbody, b)
 	}
-	return newbody
 }
 
 // infer infers each node's type and return the tree of *typedNode.
 func (a *analyzer) infer(top node.Node) (*typedNode, []node.ErrorNode) {
 	typedTop := walkNode(top, func(_ *walkCtrl, n node.Node) node.Node {
-		return &typedNode{n, ""} // TODO
+		return &typedNode{n.Clone(), ""} // TODO
 	}).(*typedNode) // returned node must be *topLevelNode
 	return typedTop, nil
 }
 
-// convertPost converts *typedNode to node.
-func (a *analyzer) convertPost(tNode *typedNode) node.Node {
-	return walkNode(tNode, func(_ *walkCtrl, n node.Node) node.Node {
+// unwrapNode converts *typedNode to *topLevelNode.
+func (a *analyzer) unwrapNode(tNode *typedNode) (*topLevelNode, *node.ErrorNode) {
+	top, ok := walkNode(tNode, func(_ *walkCtrl, n node.Node) node.Node {
 		// Unwrap node from typedNode.
 		return n.TerminalNode()
-	})
+	}).(*topLevelNode)
+	if !ok {
+		return nil, a.err(
+			fmt.Errorf("fatal: topLevelNode is required at top level (%+v)", top),
+			top,
+		)
+	}
+	return top, nil
 }
 
 // newWalkCtrl is the constructor for walkCtrl.
@@ -534,6 +613,7 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 	ctrl.push(id)
 	r := f(ctrl, n)
 	if !ctrl.followInner {
+		ctrl.followInner = true
 		ctrl.pop()
 		return r
 	}
@@ -740,20 +820,20 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 	return r
 }
 
-type seriesChecker struct {
-	checkers     []checkFn
+type multiWalker struct {
+	callbacks    []multiWalkFn
 	ctrlList     []*walkCtrl
 	ignoredPaths [][][]int
 }
 
-func newSeriesChecker(checkers ...checkFn) *seriesChecker {
-	ctrlList := make([]*walkCtrl, len(checkers))
-	ignoredPaths := make([][][]int, len(checkers))
-	for i := range checkers {
+func newMultiWalker(callbacks ...multiWalkFn) *multiWalker {
+	ctrlList := make([]*walkCtrl, len(callbacks))
+	ignoredPaths := make([][][]int, len(callbacks))
+	for i := range callbacks {
 		ctrlList[i] = newWalkCtrl()
 		ignoredPaths[i] = make([][]int, 0)
 	}
-	return &seriesChecker{checkers, ctrlList, ignoredPaths}
+	return &multiWalker{callbacks, ctrlList, ignoredPaths}
 }
 
 func containsRoute(r []int, routes [][]int) bool {
@@ -775,12 +855,14 @@ func containsRoute(r []int, routes [][]int) bool {
 // check calls check functions for node.
 // If all of check functions called dontFollowInner(),
 // check also calls dontFollowInner() for parent *walkCtrl.
-func (s *seriesChecker) check(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []node.ErrorNode {
+func (s *multiWalker) walk(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, []node.ErrorNode) {
 	errs := make([]node.ErrorNode, 0, 8)
 	route := ctrl.route()
-	for i := range s.checkers {
+	var e []node.ErrorNode
+	for i := range s.callbacks {
 		if s.ctrlList[i].followInner && !containsRoute(route, s.ignoredPaths[i]) {
-			errs = append(errs, s.checkers[i](a, s.ctrlList[i], tNode)...)
+			n, e = s.callbacks[i](a, s.ctrlList[i], n)
+			errs = append(errs, e...)
 			if !s.ctrlList[i].followInner {
 				s.ignoredPaths[i] = append(s.ignoredPaths[i], route)
 				s.ctrlList[i].followInner = true
@@ -796,5 +878,5 @@ func (s *seriesChecker) check(a *analyzer, ctrl *walkCtrl, tNode *typedNode) []n
 	if !followInner {
 		ctrl.dontFollowInner()
 	}
-	return errs
+	return n, errs
 }

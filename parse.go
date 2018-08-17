@@ -287,7 +287,9 @@ func (n *constStatement) Right() expr {
 	return n.right
 }
 
-func (n *constStatement) AssignStatement() {}
+func (n *constStatement) HasUnderscore() bool {
+	return n.hasUnderscore
+}
 
 // constStatement := "const" assignLhs "=" expr
 func (p *parser) acceptConstStatement() (node.Node, *node.ErrorNode) {
@@ -374,7 +376,7 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *node.Pos, *node
 type assignStatement interface {
 	Left() node.Node
 	Right() expr
-	AssignStatement()
+	HasUnderscore() bool
 }
 
 type letAssignStatement struct {
@@ -408,7 +410,9 @@ func (n *letAssignStatement) Right() expr {
 	return n.right
 }
 
-func (n *letAssignStatement) AssignStatement() {}
+func (n *letAssignStatement) HasUnderscore() bool {
+	return n.hasUnderscore
+}
 
 type letDeclareStatement struct {
 	left []argument
@@ -708,7 +712,9 @@ func (n *forStatement) Right() expr {
 	return n.right
 }
 
-func (n *forStatement) AssignStatement() {}
+func (n *forStatement) HasUnderscore() bool {
+	return n.hasUnderscore
+}
 
 // forStatement := "for" *blank assignLhs *blank "in" *blank expr *blank block
 func (p *parser) acceptForStatement() (node.Node, *node.ErrorNode) {
