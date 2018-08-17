@@ -257,14 +257,13 @@ func (p *parser) acceptStmtOrExpr() (node.Node, *node.ErrorNode) {
 }
 
 type constStatement struct {
-	left          node.Node
-	right         expr
-	hasUnderscore bool
+	left  node.Node
+	right expr
 }
 
 // Clone clones itself.
 func (n *constStatement) Clone() node.Node {
-	return &constStatement{n.left.Clone(), n.right.Clone(), n.hasUnderscore}
+	return &constStatement{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *constStatement) TerminalNode() node.Node {
@@ -287,8 +286,8 @@ func (n *constStatement) Right() expr {
 	return n.right
 }
 
-func (n *constStatement) HasUnderscore() bool {
-	return n.hasUnderscore
+func (n *constStatement) GetLeftIdentifiers() []*identifierNode {
+	return getLeftIdentifiers(n)
 }
 
 // constStatement := "const" assignLhs "=" expr
@@ -297,7 +296,7 @@ func (p *parser) acceptConstStatement() (node.Node, *node.ErrorNode) {
 		return nil, p.errorf("expected %s but got %s", tokenName(tokenConst), tokenName(p.peek().typ))
 	}
 	pos := p.token.pos
-	left, hasUnderscore, err := p.acceptAssignLHS()
+	left, err := p.acceptAssignLHS()
 	if err != nil {
 		return nil, err
 	}
@@ -308,27 +307,25 @@ func (p *parser) acceptConstStatement() (node.Node, *node.ErrorNode) {
 	if err != nil {
 		return nil, err
 	}
-	n := node.NewPosNode(pos, &constStatement{left, right, hasUnderscore})
+	n := node.NewPosNode(pos, &constStatement{left, right})
 	return n, nil
 }
 
 // assignLhs := identifier | destructuringAssignment
-func (p *parser) acceptAssignLHS() (node.Node, bool, *node.ErrorNode) {
+func (p *parser) acceptAssignLHS() (node.Node, *node.ErrorNode) {
 	var left node.Node
-	var hasUnderscore bool
 	if p.accept(tokenIdentifier) {
 		left = node.NewPosNode(p.token.pos, &identifierNode{p.token.val, true})
-	} else if ids, underscore, listpos, err := p.acceptDestructuringAssignment(); err == nil {
+	} else if ids, listpos, err := p.acceptDestructuringAssignment(); err == nil {
 		left = node.NewPosNode(listpos, &listNode{ids})
-		hasUnderscore = underscore
 	} else {
-		return nil, false, p.errorf(
+		return nil, p.errorf(
 			"expected %s or destructuring assignment but got %s",
 			tokenName(tokenIdentifier),
 			tokenName(p.peek().typ),
 		)
 	}
-	return left, hasUnderscore, nil
+	return left, nil
 }
 
 // destructuringAssignment := "[" *blank
@@ -336,31 +333,27 @@ func (p *parser) acceptAssignLHS() (node.Node, bool, *node.ErrorNode) {
 //                            identifierOrUnderscore *blank [ "," ]
 //                          *blank "]"
 // identifierOrUnderscore := identifier | "_"
-func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *node.Pos, *node.ErrorNode) {
+func (p *parser) acceptDestructuringAssignment() ([]expr, *node.Pos, *node.ErrorNode) {
 	if !p.accept(tokenSqOpen) {
-		return nil, false, nil, p.errorf(
+		return nil, nil, p.errorf(
 			"expected %s but got %s", tokenName(tokenLt), tokenName(p.peek().typ),
 		)
 	}
 	pos := p.token.pos
 	p.acceptBlanks()
 	if p.accept(tokenSqClose) {
-		return nil, false, nil, p.errorf("at least 1 identifier is needed")
+		return nil, nil, p.errorf("at least 1 identifier is needed")
 	}
 
 	ids := make([]expr, 0, 8)
-	var hasUnderscore bool
 	for {
 		if !p.accept(tokenIdentifier) && !p.accept(tokenUnderscore) {
-			return nil, false, nil, p.errorf(
+			return nil, nil, p.errorf(
 				"expected %s or %s but got %s",
 				tokenName(tokenIdentifier),
 				tokenName(tokenUnderscore),
 				tokenName(p.peek().typ),
 			)
-		}
-		if p.token.val == "_" {
-			hasUnderscore = true
 		}
 		ids = append(ids, node.NewPosNode(p.token.pos, &identifierNode{p.token.val, true}))
 		p.acceptBlanks()
@@ -370,24 +363,40 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, bool, *node.Pos, *node
 			break
 		}
 	}
-	return ids, hasUnderscore, pos, nil
+	return ids, pos, nil
 }
 
 type assignStatement interface {
 	Left() node.Node
 	Right() expr
-	HasUnderscore() bool
+	GetLeftIdentifiers() []*identifierNode
+}
+
+func getLeftIdentifiers(n assignStatement) []*identifierNode {
+	switch left := n.Left().TerminalNode().(type) {
+	case *listNode: // Destructuring
+		ids := make([]*identifierNode, 0, len(left.value))
+		for i := range left.value {
+			if id, ok := left.value[i].TerminalNode().(*identifierNode); ok {
+				ids = append(ids, id)
+			}
+		}
+		return ids
+	case *identifierNode:
+		return []*identifierNode{left}
+	default:
+		return nil
+	}
 }
 
 type letAssignStatement struct {
-	left          node.Node
-	right         expr
-	hasUnderscore bool
+	left  node.Node
+	right expr
 }
 
 // Clone clones itself.
 func (n *letAssignStatement) Clone() node.Node {
-	return &letAssignStatement{n.left.Clone(), n.right.Clone(), n.hasUnderscore}
+	return &letAssignStatement{n.left.Clone(), n.right.Clone()}
 }
 
 func (n *letAssignStatement) TerminalNode() node.Node {
@@ -410,8 +419,8 @@ func (n *letAssignStatement) Right() expr {
 	return n.right
 }
 
-func (n *letAssignStatement) HasUnderscore() bool {
-	return n.hasUnderscore
+func (n *letAssignStatement) GetLeftIdentifiers() []*identifierNode {
+	return getLeftIdentifiers(n)
 }
 
 type letDeclareStatement struct {
@@ -449,7 +458,6 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 	pos := p.token.pos
 	var left node.Node
 	var right node.Node
-	var hasUnderscore bool
 
 	if arg, err := p.acceptVariableAndType(); err == nil {
 		if id, ok := arg.left.TerminalNode().(*identifierNode); ok {
@@ -479,9 +487,8 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 		}
 		n := node.NewPosNode(pos, &letDeclareStatement{left})
 		return n, nil
-	} else if l, underscore, err := p.acceptAssignLHS(); err == nil {
+	} else if l, err := p.acceptAssignLHS(); err == nil {
 		left = l
-		hasUnderscore = underscore
 		if !p.accept(tokenEqual) {
 			return nil, p.errorf(
 				"expected %s but got %s",
@@ -494,7 +501,7 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 		if err != nil {
 			return nil, err
 		}
-		n := node.NewPosNode(pos, &letAssignStatement{left, right, hasUnderscore})
+		n := node.NewPosNode(pos, &letAssignStatement{left, right})
 		return n, nil
 	} else {
 		return nil, p.errorf(
@@ -675,10 +682,9 @@ func (p *parser) acceptWhileStatement() (node.Node, *node.ErrorNode) {
 }
 
 type forStatement struct {
-	left          node.Node
-	right         expr
-	body          []node.Node
-	hasUnderscore bool
+	left  node.Node
+	right expr
+	body  []node.Node
 }
 
 // Clone clones itself.
@@ -688,7 +694,7 @@ func (n *forStatement) Clone() node.Node {
 		body[i] = n.body[i].Clone()
 	}
 	return &forStatement{
-		n.left.Clone(), n.right.Clone(), body, n.hasUnderscore,
+		n.left.Clone(), n.right.Clone(), body,
 	}
 }
 
@@ -712,8 +718,8 @@ func (n *forStatement) Right() expr {
 	return n.right
 }
 
-func (n *forStatement) HasUnderscore() bool {
-	return n.hasUnderscore
+func (n *forStatement) GetLeftIdentifiers() []*identifierNode {
+	return getLeftIdentifiers(n)
 }
 
 // forStatement := "for" *blank assignLhs *blank "in" *blank expr *blank block
@@ -723,7 +729,7 @@ func (p *parser) acceptForStatement() (node.Node, *node.ErrorNode) {
 	}
 	p.acceptBlanks()
 	pos := p.token.pos
-	left, hasUnderscore, err := p.acceptAssignLHS()
+	left, err := p.acceptAssignLHS()
 	if err != nil {
 		return nil, err
 	}
@@ -741,7 +747,7 @@ func (p *parser) acceptForStatement() (node.Node, *node.ErrorNode) {
 	if err != nil {
 		return nil, err
 	}
-	n := node.NewPosNode(pos, &forStatement{left, right, body, hasUnderscore})
+	n := node.NewPosNode(pos, &forStatement{left, right, body})
 	return n, nil
 }
 

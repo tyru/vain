@@ -498,27 +498,13 @@ func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 	nr := 0
 	for i := range body {
 		body[i] = walkNode(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
-			var as assignStatement
+			var ids []*identifierNode
 			switch nn := n.TerminalNode().(type) {
 			case *funcStmtOrExpr:
 				ctrl.dontFollowInner()
 				return n
 			case assignStatement:
-				as = nn
-			default:
-				return n
-			}
-			var ids []*identifierNode
-			switch nn := as.Left().TerminalNode().(type) {
-			case *listNode: // Destructuring
-				ids = make([]*identifierNode, 0, len(nn.value))
-				for i := range nn.value {
-					if id, ok := nn.value[i].TerminalNode().(*identifierNode); ok {
-						ids = append(ids, id)
-					}
-				}
-			case *identifierNode:
-				ids = []*identifierNode{nn}
+				ids = nn.GetLeftIdentifiers()
 			default:
 				return n
 			}
