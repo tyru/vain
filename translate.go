@@ -25,7 +25,7 @@ type translator struct {
 
 func (t *translator) Run() {
 	for node := range t.inNodes {
-		toplevel := t.toReader(node, node)
+		toplevel := t.toReader(node, nil)
 		t.emit(strings.NewReader("scriptencoding utf-8\n"))
 		if len(t.namedExprFuncs) > 0 {
 			t.emit(strings.NewReader("\" vain: begin named expression functions\n"))
