@@ -212,7 +212,7 @@ func (t *translator) newTopLevelNodeReader(node *topLevelNode) io.Reader {
 
 func (t *translator) newImportStatementReader(stmt *importStatement, parent node.Node) io.Reader {
 	// TODO
-	return strings.NewReader("")
+	return emptyReader
 }
 
 func (t *translator) newFuncReader(f *funcStmtOrExpr, parent node.Node) io.Reader {
