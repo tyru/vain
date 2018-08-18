@@ -91,29 +91,28 @@ func cmdBuild(args []string) error {
 	return multierror.Append(nil, errs...).ErrorOrNil()
 }
 
+// collectTargetFiles collects .vain files under current directory.
+// If arguments were given, pass them as filenames.
+// If the argument is a directory, collect filenames recursively.
 func collectTargetFiles(args []string, files chan<- string) error {
-	if len(args) > 0 {
-		// If arguments were given, pass them as filenames.
-		for i := range args {
-			if _, err := os.Stat(args[i]); os.IsNotExist(err) {
+	if len(args) == 0 {
+		args = []string{"."}
+	}
+	for i := range args {
+		err := filepath.Walk(args[i], func(path string, info os.FileInfo, err error) error {
+			if err != nil {
 				return err
 			}
-		}
-		for i := range args {
-			files <- args[i]
-		}
-		return nil
-	}
-	// Otherwise, collect .vain files under current directory.
-	return filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+			if strings.HasSuffix(strings.ToLower(path), ".vain") {
+				files <- path
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		if strings.HasSuffix(strings.ToLower(path), ".vain") {
-			files <- path
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func buildFile(name string) error {
