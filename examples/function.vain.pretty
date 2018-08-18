@@ -1,46 +1,56 @@
-func  f1() { }
-func <autoload> f2() { }
-func <autoload, noabort> f3() { }
-func  f4()   1
-func <autoload> f5()   2
-func <autoload, noabort> f6()   3
-func  f7(a)   42
-func  f8(a, b)   42
-func  f9(a, b)   42
-func  f10(a)   42
-func  f11(a)   42
-func  f12(a, b)   42
-func  f13(a, b)   42
-func () {  return 42 }
-func () {  return 42 }
-func () {  return }
-func () {  return }
-func ()   1
-func <autoload>()   2
-func <autoload>() { }
-func (a)   42
-func (a) { }
-func <autoload>(a)   42
-func <autoload>(a) { }
-func  expr1() { }
-func <autoload> expr2() { }
-func <autoload, noabort> expr3() { }
-func  expr4()   1
-func <autoload> expr5()   2
-func <autoload, noabort> expr6()   3
-func  expr7(a)   42
-func  expr8(a, b)   42
-func  expr9(a, b)   42
-func  expr10(a)   42
-func  expr11(a)   42
-func  expr12(a, b)   42
-func  expr13(a, b)   42
-func () {  return 42 }
-func ()   1
-func <autoload>()   2
-func <autoload>() { }
-func (a)   42
-func (a) { }
-func <autoload>(a)   42
-func <autoload>(a) { }
-func  func_with_type() Int { }
+func f1() {}
+func <autoload> f2 () {}
+func <autoload, noabort> f3 () {}
+func f4() 1
+func <autoload> f5 () 2
+func <autoload, noabort> f6 () 3
+func f7(a: Int) 42
+func f8(a: Int, b: Int) 42
+func f9(a: Int, b: Int) 42
+func f10(a: Int) 42
+func f11(a: Int) 42
+func f12(a: Int, b: Int) 42
+func f13(a: Int, b: Int) 42
+func() {
+  return 42
+}
+func() {
+  return 42
+}
+func() {
+  return
+}
+func() {
+  return
+}
+func() 1
+func <autoload> () 2
+func <autoload> () {}
+func(a: Int) 42
+func(a: Int) {}
+func <autoload> (a: Int) 42
+func <autoload> (a: Int) {}
+func expr1() {}
+func <autoload> expr2 () {}
+func <autoload, noabort> expr3 () {}
+func expr4() 1
+func <autoload> expr5 () 2
+func <autoload, noabort> expr6 () 3
+func expr7(a: Int) 42
+func expr8(a: Int, b: Int) 42
+func expr9(a: Int, b: Int) 42
+func expr10(a: Int) 42
+func expr11(a: Int) 42
+func expr12(a: Int, b: Int) 42
+func expr13(a: Int, b: Int) 42
+func() {
+  return 42
+})
+func() 1
+func <autoload> () 2
+func <autoload> () {}
+func(a: Int) 42
+func(a: Int) {}
+func <autoload> (a: Int) 42
+func <autoload> (a: Int) {}
+func func_with_type(): Int {}

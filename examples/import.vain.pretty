@@ -1,4 +1,4 @@
 import '$vim/ex'
 import '$vim/ex' as excmd
-from '$vim/ex' import echo execute
-from '$vim/ex' import echo execute as exe
+from '$vim/ex' import echo, execute
+from '$vim/ex' import echo, execute as exe

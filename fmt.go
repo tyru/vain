@@ -10,9 +10,9 @@ import (
 	"github.com/tyru/vain/node"
 )
 
-// TODO parenthesis (parser should emit parenNode)
-// TODO newline (see Position())
-// TODO comment (parser should emit commentNode even in expression)
+// TODO parenthesis (parser should emit parenNode?)
+// TODO newline (see Position()?)
+// TODO comment (parser should emit commentNode even in expression?)
 
 func format(name string, inNodes <-chan node.Node) *formatter {
 	return &formatter{name, inNodes, make(chan io.Reader), "  ", 0}
@@ -98,43 +98,43 @@ func (f *formatter) toReader(node, parent node.Node) io.Reader {
 	case *andNode:
 		return f.newBinaryOpNodeReader(n, parent, "&&")
 	case *equalNode:
-		return f.newBinaryOpNodeReader(n, parent, "==#")
+		return f.newBinaryOpNodeReader(n, parent, "==")
 	case *equalCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "==?")
 	case *nequalNode:
-		return f.newBinaryOpNodeReader(n, parent, "!=#")
+		return f.newBinaryOpNodeReader(n, parent, "!=")
 	case *nequalCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "!=?")
 	case *greaterNode:
-		return f.newBinaryOpNodeReader(n, parent, ">#")
+		return f.newBinaryOpNodeReader(n, parent, ">")
 	case *greaterCiNode:
 		return f.newBinaryOpNodeReader(n, parent, ">?")
 	case *gequalNode:
-		return f.newBinaryOpNodeReader(n, parent, ">=#")
+		return f.newBinaryOpNodeReader(n, parent, ">=")
 	case *gequalCiNode:
 		return f.newBinaryOpNodeReader(n, parent, ">=?")
 	case *smallerNode:
-		return f.newBinaryOpNodeReader(n, parent, "<#")
+		return f.newBinaryOpNodeReader(n, parent, "<")
 	case *smallerCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "<?")
 	case *sequalNode:
-		return f.newBinaryOpNodeReader(n, parent, "<=#")
+		return f.newBinaryOpNodeReader(n, parent, "<=")
 	case *sequalCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "<=?")
 	case *matchNode:
-		return f.newBinaryOpNodeReader(n, parent, "=~#")
+		return f.newBinaryOpNodeReader(n, parent, "=~")
 	case *matchCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "=~?")
 	case *noMatchNode:
-		return f.newBinaryOpNodeReader(n, parent, "!~#")
+		return f.newBinaryOpNodeReader(n, parent, "!~")
 	case *noMatchCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "!~?")
 	case *isNode:
-		return f.newBinaryOpNodeReader(n, parent, "is#")
+		return f.newBinaryOpNodeReader(n, parent, "is")
 	case *isCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "is?")
 	case *isNotNode:
-		return f.newBinaryOpNodeReader(n, parent, "isnot#")
+		return f.newBinaryOpNodeReader(n, parent, "isnot")
 	case *isNotCiNode:
 		return f.newBinaryOpNodeReader(n, parent, "isnot?")
 	case *addNode:
@@ -228,7 +228,7 @@ func (f *formatter) newFromImportStatementReader(stmt *importStatement, parent n
 	buf.WriteString(" import ")
 	for i := range stmt.fnlist {
 		if i > 0 {
-			buf.WriteString(" ")
+			buf.WriteString(", ")
 		}
 		switch len(stmt.fnlist[i]) {
 		case 1:
@@ -250,10 +250,9 @@ func (f *formatter) newFromImportStatementReader(stmt *importStatement, parent n
 
 func (f *formatter) newFuncDeclareStatementReader(n *funcDeclareStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
-	buf.WriteString(f.indent())
-	buf.WriteString("func ")
+	buf.WriteString("func")
 	if len(n.mods) > 0 {
-		buf.WriteString("<")
+		buf.WriteString(" <")
 		for i := range n.mods {
 			if i > 0 {
 				buf.WriteString(", ")
@@ -266,12 +265,15 @@ func (f *formatter) newFuncDeclareStatementReader(n *funcDeclareStatement, paren
 		buf.WriteString(" ")
 		buf.WriteString(n.name)
 	}
+	if len(n.mods) > 0 {
+		buf.WriteString(" ")
+	}
 	buf.WriteString("(")
 	for i := range n.args {
 		if i > 0 {
 			buf.WriteString(", ")
 		}
-		r := f.newArgumentReader(&n.args[i])
+		r := f.newArgumentReader(&n.args[i], n)
 		_, err := io.Copy(&buf, r)
 		if err != nil {
 			return f.err(err, n)
@@ -279,7 +281,7 @@ func (f *formatter) newFuncDeclareStatementReader(n *funcDeclareStatement, paren
 	}
 	buf.WriteString(")")
 	if n.retType != "" {
-		buf.WriteString(" ")
+		buf.WriteString(": ")
 		buf.WriteString(n.retType)
 	}
 	return strings.NewReader(buf.String())
@@ -293,9 +295,18 @@ func (f *formatter) newFuncReader(n *funcStmtOrExpr, parent node.Node) io.Reader
 		return f.err(err, n)
 	}
 	buf.WriteString(" ")
-	if n.bodyIsStmt {
-		buf.WriteString("{")
+	if !n.bodyIsStmt { // body is expression
+		_, err := io.Copy(&buf, f.toReader(n.body[0], n))
+		if err != nil {
+			return f.err(err, n.body[0])
+		}
+		return strings.NewReader(buf.String())
 	}
+	if len(n.body) == 0 { // empty block
+		buf.WriteString("{}")
+		return strings.NewReader(buf.String())
+	}
+	buf.WriteString("{\n")
 	f.incIndent()
 	for i := range n.body {
 		buf.WriteString(f.indent())
@@ -303,23 +314,47 @@ func (f *formatter) newFuncReader(n *funcStmtOrExpr, parent node.Node) io.Reader
 		if err != nil {
 			return f.err(err, n.body[i])
 		}
+		buf.WriteString("\n")
 	}
 	f.decIndent()
-	if n.bodyIsStmt {
-		buf.WriteString(f.indent())
-		buf.WriteString(" }")
+	buf.WriteString(f.indent())
+	buf.WriteString("}")
+	if n.isExpr {
+		buf.WriteString(")")
 	}
 	return strings.NewReader(buf.String())
 }
 
-func (f *formatter) newArgumentReader(n *argument) io.Reader {
+func (f *formatter) newArgumentReader(n *argument, parent node.Node) io.Reader {
+	var buf bytes.Buffer
+	// TODO change argument.left to *identifierNode
 	if vname, ok := n.left.TerminalNode().(*identifierNode); ok {
-		return strings.NewReader(vname.value)
+		r := strings.NewReader(vname.value)
+		_, err := io.Copy(&buf, r)
+		if err != nil {
+			return f.err(err, vname)
+		}
+	} else {
+		return f.err(fmt.Errorf(
+			"fatal: unexpected node: argument.left is not *identifierNode (%+v)",
+			reflect.TypeOf(n.left),
+		), n.left)
 	}
-	return f.err(fmt.Errorf(
-		"fatal: unexpected node: argument.left is not *identifierNode (%+v)",
-		reflect.TypeOf(n.left),
-	), n.left)
+	buf.WriteString(": ")
+	if n.defaultVal != nil {
+		_, err := io.Copy(&buf, f.toReader(n.defaultVal, parent))
+		if err != nil {
+			return f.err(err, n.defaultVal)
+		}
+	} else if n.typ != "" {
+		buf.WriteString(n.typ)
+	} else {
+		return f.err(fmt.Errorf(
+			"fatal: unexpected node: both argument.typ and n.defaultVal must not be empty (%+v)",
+			reflect.TypeOf(n),
+		), n.left)
+	}
+	return strings.NewReader(buf.String())
 }
 
 func (f *formatter) newIfStatementReader(node *ifStatement, parent node.Node, top bool) io.Reader {
@@ -456,7 +491,7 @@ func (f *formatter) newLetDeclareStatementReader(n *letDeclareStatement, parent 
 	var buf bytes.Buffer
 	buf.WriteString("let ")
 	for i := range n.left {
-		r := f.newArgumentReader(&n.left[i])
+		r := f.newArgumentReader(&n.left[i], n)
 		_, err := io.Copy(&buf, r)
 		if err != nil {
 			return f.err(err, n)
@@ -465,15 +500,26 @@ func (f *formatter) newLetDeclareStatementReader(n *letDeclareStatement, parent 
 	return strings.NewReader(buf.String())
 }
 
-func (f *formatter) newTernaryNodeReader(node *ternaryNode, parent node.Node) io.Reader {
-	cond := f.toReader(node.cond, parent)
-	left := f.toReader(node.left, parent)
-	right := f.toReader(node.right, parent)
-	return strings.NewReader(
-		fmt.Sprintf("%s ? %s : %s",
-			f.paren(cond, node.cond),
-			f.paren(left, node.left),
-			f.paren(right, node.right)))
+func (f *formatter) newTernaryNodeReader(n *ternaryNode, parent node.Node) io.Reader {
+	var buf bytes.Buffer
+	cond := f.toReader(n.cond, parent)
+	_, err := io.Copy(&buf, f.paren(cond, n.cond))
+	if err != nil {
+		return f.err(err, n.cond)
+	}
+	buf.WriteString(" ? ")
+	left := f.toReader(n.left, parent)
+	_, err = io.Copy(&buf, f.paren(left, n.left))
+	if err != nil {
+		return f.err(err, n.left)
+	}
+	buf.WriteString(" : ")
+	right := f.toReader(n.right, parent)
+	_, err = io.Copy(&buf, f.paren(right, n.right))
+	if err != nil {
+		return f.err(err, n.right)
+	}
+	return strings.NewReader(buf.String())
 }
 
 func (f *formatter) newBinaryOpNodeReader(node binaryOpNode, parent node.Node, opstr string) io.Reader {
@@ -636,9 +682,9 @@ func (f *formatter) newDictionaryNodeReader(node *dictionaryNode, parent node.No
 		if err != nil {
 			return f.err(err, valNode)
 		}
-		args = append(args, fmt.Sprintf("%s:%s", key.String(), val.String()))
+		args = append(args, fmt.Sprintf("%s: %s", key.String(), val.String()))
 	}
-	s := "{" + strings.Join(args, ",") + "}"
+	s := "{" + strings.Join(args, ", ") + "}"
 	return strings.NewReader(s)
 }
 
