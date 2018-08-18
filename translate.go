@@ -84,6 +84,8 @@ func (t *translator) toReader(node, parent node.Node) io.Reader {
 		return t.newTopLevelNodeReader(n)
 	case *importStatement:
 		return t.newImportStatementReader(n, parent)
+	case *funcDeclareStatement:
+		return t.newFuncDeclareStatementReader(n, parent)
 	case *funcStmtOrExpr:
 		return t.newFuncReader(n, parent)
 	case *returnStatement:
@@ -215,14 +217,19 @@ func (t *translator) newImportStatementReader(stmt *importStatement, parent node
 	return emptyReader
 }
 
+func (t *translator) newFuncDeclareStatementReader(f *funcDeclareStatement, parent node.Node) io.Reader {
+	// TODO
+	return emptyReader
+}
+
 func (t *translator) newFuncReader(f *funcStmtOrExpr, parent node.Node) io.Reader {
 	if !f.IsExpr() {
 		// Function statement is required.
-		if f.name != "" {
+		if f.declare.name != "" {
 			return t.newFuncStmtReader(f, "")
 		}
 		if len(f.body) == 0 {
-			autoload, global, _ := t.convertModifiers(f.mods)
+			autoload, global, _ := t.convertModifiers(f.declare.mods)
 			name := t.getFuncName(f, autoload, global)
 			if name == "" {
 				name = t.generateFuncName()
@@ -233,8 +240,8 @@ func (t *translator) newFuncReader(f *funcStmtOrExpr, parent node.Node) io.Reade
 		return t.newLambdaReader(f, parent)
 	}
 	// Function expression is required.
-	if f.name != "" || len(f.body) == 0 {
-		autoload, global, _ := t.convertModifiers(f.mods)
+	if f.declare.name != "" || len(f.body) == 0 {
+		autoload, global, _ := t.convertModifiers(f.declare.mods)
 		name := t.getFuncName(f, autoload, global)
 		if name == "" {
 			name = t.generateFuncName()
@@ -248,7 +255,7 @@ func (t *translator) newFuncReader(f *funcStmtOrExpr, parent node.Node) io.Reade
 func (t *translator) isVoidExprFunc(f *funcStmtOrExpr, parent node.Node) bool {
 	if !f.IsExpr() {
 		// Function statement is required.
-		if f.name != "" {
+		if f.declare.name != "" {
 			return false
 		}
 		return true
@@ -264,16 +271,16 @@ func (t *translator) isVoidExprFunc(f *funcStmtOrExpr, parent node.Node) bool {
 }
 
 func (t *translator) getFuncName(f *funcStmtOrExpr, autoload, global bool) string {
-	if f.name == "" {
+	if f.declare.name == "" {
 		return ""
 	}
 	if autoload {
-		return f.name
+		return f.declare.name
 	} else if global {
 		// TODO Check if function name starts with uppercase letter in analyzer.
-		return f.name
+		return f.declare.name
 	}
-	return "s:" + f.name
+	return "s:" + f.declare.name
 }
 
 func (t *translator) generateFuncName() string {
@@ -283,7 +290,7 @@ func (t *translator) generateFuncName() string {
 }
 
 func (t *translator) newFuncStmtReader(f *funcStmtOrExpr, name string) io.Reader {
-	autoload, global, vimmods := t.convertModifiers(f.mods)
+	autoload, global, vimmods := t.convertModifiers(f.declare.mods)
 	if name == "" {
 		name = t.getFuncName(f, autoload, global)
 	}
@@ -291,13 +298,13 @@ func (t *translator) newFuncStmtReader(f *funcStmtOrExpr, name string) io.Reader
 	buf.WriteString("function! ")
 	buf.WriteString(name)
 	buf.WriteString("(")
-	for i := range f.args {
+	for i := range f.declare.args {
 		if i > 0 {
 			buf.WriteString(",")
 		}
-		_, err := io.Copy(&buf, t.toExcmd(f.args[i].left, f))
+		_, err := io.Copy(&buf, t.toExcmd(f.declare.args[i].left, f))
 		if err != nil {
-			return t.err(err, f.args[i].left)
+			return t.err(err, f.declare.args[i].left)
 		}
 	}
 	buf.WriteString(")")
@@ -324,13 +331,13 @@ func (t *translator) newFuncStmtReader(f *funcStmtOrExpr, name string) io.Reader
 func (t *translator) newLambdaReader(f *funcStmtOrExpr, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("{")
-	for i := range f.args {
+	for i := range f.declare.args {
 		if i > 0 {
 			buf.WriteString(",")
 		}
-		_, err := io.Copy(&buf, t.toExcmd(f.args[i].left, f))
+		_, err := io.Copy(&buf, t.toExcmd(f.declare.args[i].left, f))
 		if err != nil {
-			return t.err(err, f.args[i].left)
+			return t.err(err, f.declare.args[i].left)
 		}
 	}
 	buf.WriteString("->")

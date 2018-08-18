@@ -933,29 +933,23 @@ func (p *parser) acceptImportFunctionList() ([][]string, *node.ErrorNode) {
 }
 
 type funcStmtOrExpr struct {
-	isExpr     bool
-	mods       []string
-	name       string
-	args       []argument
-	retType    string
+	declare    *funcDeclareStatement
 	bodyIsStmt bool
 	body       []node.Node
+	isExpr     bool
 }
 
 // Clone clones itself.
 func (n *funcStmtOrExpr) Clone() node.Node {
-	mods := make([]string, len(n.mods))
-	copy(mods, n.mods)
-	args := make([]argument, len(n.args))
-	for i := range n.args {
-		args[i] = *n.args[i].Clone()
-	}
 	body := make([]node.Node, len(n.body))
 	for i := range n.body {
 		body[i] = n.body[i].Clone()
 	}
 	return &funcStmtOrExpr{
-		n.isExpr, mods, n.name, args, n.retType, n.bodyIsStmt, body,
+		n.declare.Clone().(*funcDeclareStatement),
+		n.bodyIsStmt,
+		body,
+		n.isExpr,
 	}
 }
 
@@ -971,42 +965,24 @@ func (n *funcStmtOrExpr) IsExpr() bool {
 	return n.isExpr
 }
 
-// function :=
-//        "func" [ functionModifierList ] [ identifier ] functionCallSignature expr1 /
-//        "func" [ functionModifierList ] [ identifier ] functionCallSignature block
+// function := funcStmtOrExpr | funcDeclareStatement
+// funcStmtOrExpr := funcDeclare ( expr1 | block )
+// funcDeclareStatement := funcDeclare ( LF | EOF )
 func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
-	if !p.accept(tokenFunc) {
-		return nil, p.errorf("expected %s but got %s", tokenName(tokenFunc), tokenName(p.peek().typ))
-	}
-	pos := p.token.pos
-
-	var mods []string
-	var name string
-	var args []argument
-	var retType string
-	var bodyIsStmt bool
-	var body []node.Node
-	var err *node.ErrorNode
-
-	// Modifiers
-	if p.accept(tokenLt) {
-		p.backup(p.token)
-		mods, err = p.acceptModifiers()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Function name (if empty, this is an expression not a statement)
-	if p.accept(tokenIdentifier) {
-		name = p.token.val
-	}
-
-	// functionCallSignature
-	args, retType, err = p.acceptFunctionCallSignature()
+	declare, pos, err := p.acceptFuncDeclare()
 	if err != nil {
 		return nil, err
 	}
+
+	// No body, declaration only.
+	t := p.next()
+	if t.typ == tokenNewline || t.typ == tokenEOF {
+		return node.NewPosNode(pos, declare), nil
+	}
+	p.backup(t)
+
+	var bodyIsStmt bool
+	var body []node.Node
 
 	// Body
 	if p.accept(tokenCOpen) {
@@ -1025,8 +1001,86 @@ func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
 		body = []node.Node{expr}
 	}
 
-	f := node.NewPosNode(pos, &funcStmtOrExpr{isExpr, mods, name, args, retType, bodyIsStmt, body})
-	return f, nil
+	funcNode := &funcStmtOrExpr{
+		declare,
+		bodyIsStmt,
+		body,
+		isExpr,
+	}
+	return node.NewPosNode(pos, funcNode), nil
+}
+
+type funcDeclareStatement struct {
+	mods    []string
+	name    string
+	args    []argument
+	retType string
+}
+
+// Clone clones itself.
+func (n *funcDeclareStatement) Clone() node.Node {
+	mods := make([]string, len(n.mods))
+	copy(mods, n.mods)
+	args := make([]argument, len(n.args))
+	for i := range n.args {
+		args[i] = *n.args[i].Clone()
+	}
+	return &funcDeclareStatement{
+		mods, n.name, args, n.retType,
+	}
+}
+
+func (n *funcDeclareStatement) TerminalNode() node.Node {
+	return n
+}
+
+func (n *funcDeclareStatement) Position() *node.Pos {
+	return nil
+}
+
+func (n *funcDeclareStatement) IsExpr() bool {
+	return false
+}
+
+// funcDeclare := "func" [ funcModifierList ] [ identifier ] functionCallSignature
+func (p *parser) acceptFuncDeclare() (*funcDeclareStatement, *node.Pos, *node.ErrorNode) {
+	if !p.accept(tokenFunc) {
+		return nil, nil, p.errorf(
+			"expected %s but got %s",
+			tokenName(tokenFunc),
+			tokenName(p.peek().typ),
+		)
+	}
+	pos := p.token.pos
+
+	var mods []string
+	var name string
+	var args []argument
+	var retType string
+	var err *node.ErrorNode
+
+	// Modifiers
+	if p.accept(tokenLt) {
+		p.backup(p.token)
+		mods, err = p.acceptModifiers()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Function name (if empty, this is an expression not a statement)
+	if p.accept(tokenIdentifier) {
+		name = p.token.val
+	}
+
+	// functionCallSignature
+	args, retType, err = p.acceptFunctionCallSignature()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	f := &funcDeclareStatement{mods, name, args, retType}
+	return f, pos, nil
 }
 
 // functionModifierList := "<" *blank

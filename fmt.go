@@ -73,6 +73,8 @@ func (f *formatter) toReader(node, parent node.Node) io.Reader {
 		return f.newTopLevelNodeReader(n)
 	case *importStatement:
 		return f.newImportStatementReader(n, parent)
+	case *funcDeclareStatement:
+		return f.newFuncDeclareStatementReader(n, parent)
 	case *funcStmtOrExpr:
 		return f.newFuncReader(n, parent)
 	case *returnStatement:
@@ -246,7 +248,7 @@ func (f *formatter) newFromImportStatementReader(stmt *importStatement, parent n
 	return strings.NewReader(buf.String())
 }
 
-func (f *formatter) newFuncReader(n *funcStmtOrExpr, parent node.Node) io.Reader {
+func (f *formatter) newFuncDeclareStatementReader(n *funcDeclareStatement, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString(f.indent())
 	buf.WriteString("func ")
@@ -279,6 +281,16 @@ func (f *formatter) newFuncReader(n *funcStmtOrExpr, parent node.Node) io.Reader
 	if n.retType != "" {
 		buf.WriteString(" ")
 		buf.WriteString(n.retType)
+	}
+	return strings.NewReader(buf.String())
+}
+
+func (f *formatter) newFuncReader(n *funcStmtOrExpr, parent node.Node) io.Reader {
+	var buf bytes.Buffer
+	declare := f.newFuncDeclareStatementReader(n.declare, parent)
+	_, err := io.Copy(&buf, declare)
+	if err != nil {
+		return f.err(err, n)
 	}
 	buf.WriteString(" ")
 	if n.bodyIsStmt {

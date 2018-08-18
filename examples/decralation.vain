@@ -42,3 +42,14 @@ func g() {
     }
   }
 }
+
+# function declarations
+func f1()
+func <autoload> f2()
+func <autoload, noabort> f3()
+func f4()
+func <autoload> f5()
+func <autoload, noabort> f6()
+func f7(a: Int)
+func f8(a: Int, b:Int)
+func f9(a: Int, b:Int,)

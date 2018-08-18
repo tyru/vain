@@ -24,3 +24,13 @@ func  g() {  const foo = 42    func  inner() {    const foo = 42    const [_,bar
         let [_,r] = [123,456]
       }
     }   } }
+# function declarations
+func  f1()
+func <autoload> f2()
+func <autoload, noabort> f3()
+func  f4()
+func <autoload> f5()
+func <autoload, noabort> f6()
+func  f7(a)
+func  f8(a, b)
+func  f9(a, b)

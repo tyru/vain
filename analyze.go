@@ -415,6 +415,13 @@ func (a *analyzer) getDeclaredVars(n node.Node) []node.Node {
 			}
 		}
 		return vars
+	case *funcDeclareStatement:
+		id := &identifierNode{nn.name, true}
+		var retNode node.Node = id
+		if pos := n.Position(); pos != nil {
+			retNode = node.NewPosNode(pos, id)
+		}
+		return []node.Node{retNode}
 	default:
 		return nil
 	}
@@ -430,7 +437,9 @@ func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode)
 	walkNode(n, func(ctrl *walkCtrl, n node.Node) node.Node {
 		switch nn := n.TerminalNode().(type) {
 		case *funcStmtOrExpr:
-			ctrl.dontFollowInner() // skip another function (expression).
+			ctrl.dontFollowInner() // skip another function.
+		case *funcDeclareStatement:
+			ctrl.dontFollowInner() // skip another function.
 		case assignStatement:
 			lhs := append(ctrl.route(), 0)
 			declroutes = append(declroutes, lhs)
@@ -609,7 +618,7 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 			nn.body[i] = ctrl.walk(nn.body[i], i, f)
 		}
 	case *importStatement:
-	case *funcStmtOrExpr:
+	case *funcDeclareStatement:
 		ctrl.push(0)
 		for i := range nn.args {
 			ctrl.push(i)
@@ -620,6 +629,8 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 			ctrl.pop()
 		}
 		ctrl.pop()
+	case *funcStmtOrExpr:
+		ctrl.walk(nn.declare, 0, f)
 		ctrl.push(1)
 		for i := range nn.body {
 			nn.body[i] = ctrl.walk(nn.body[i], i, f)
