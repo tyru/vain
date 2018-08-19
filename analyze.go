@@ -391,7 +391,10 @@ func (a *analyzer) checkInnerBlock(n node.Node, scope *scope) []node.ErrorNode {
 // if original node has a position.
 func (a *analyzer) getDeclaredVars(n node.Node) []node.Node {
 	switch nn := n.TerminalNode().(type) {
-	case assignStatement:
+	case *assignExpr:
+		// *assignExpr is assignNode, but is not a declaration!
+		return nil
+	case assignNode:
 		switch nnn := nn.Left().TerminalNode().(type) {
 		case *listNode:
 			vars := make([]node.Node, 0, len(nnn.value))
@@ -440,7 +443,9 @@ func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode)
 			ctrl.dontFollowInner() // skip another function.
 		case *funcDeclareStatement:
 			ctrl.dontFollowInner() // skip another function.
-		case assignStatement:
+		case *assignExpr:
+			// *assignExpr is assignNode, but is not a declaration!
+		case assignNode:
 			lhs := append(ctrl.route(), 0)
 			declroutes = append(declroutes, lhs)
 		case *letDeclareStatement:
@@ -514,7 +519,7 @@ func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 			case *funcStmtOrExpr:
 				ctrl.dontFollowInner()
 				return n
-			case assignStatement:
+			case assignNode:
 				ids = nn.GetLeftIdentifiers()
 			default:
 				return n
@@ -648,6 +653,9 @@ func (ctrl *walkCtrl) walk(n node.Node, id int, f func(*walkCtrl, node.Node) nod
 		}
 		ctrl.pop()
 	case *letAssignStatement:
+		nn.left = ctrl.walk(nn.left, 0, f)
+		nn.right = ctrl.walk(nn.right, 1, f)
+	case *assignExpr:
 		nn.left = ctrl.walk(nn.left, 0, f)
 		nn.right = ctrl.walk(nn.right, 1, f)
 	case *ifStatement:

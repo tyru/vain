@@ -1,4 +1,6 @@
 scriptencoding utf-8
+
+let n = 42
 1 ? 2 : 3
 1 ? "12" : "34"
 1 && 2

@@ -96,6 +96,8 @@ func (t *translator) toReader(node, parent node.Node) io.Reader {
 		return t.newLetDeclareStatementReader(n, parent)
 	case *letAssignStatement:
 		return t.newAssignStatementReader(n, parent)
+	case *assignExpr:
+		return t.newAssignStatementReader(n, parent)
 	case *ifStatement:
 		return t.newIfStatementReader(n, parent, true)
 	case *whileStatement:
@@ -493,7 +495,7 @@ func (t *translator) newReturnNodeReader(node *returnStatement, parent node.Node
 	return strings.NewReader(s)
 }
 
-func (t *translator) newAssignStatementReader(node assignStatement, parent node.Node) io.Reader {
+func (t *translator) newAssignStatementReader(node assignNode, parent node.Node) io.Reader {
 	var buf bytes.Buffer
 	buf.WriteString("let ")
 	_, err := io.Copy(&buf, t.toReader(node.Left(), parent))

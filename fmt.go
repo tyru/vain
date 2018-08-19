@@ -85,6 +85,8 @@ func (f *formatter) toReader(node, parent node.Node) io.Reader {
 		return f.newLetDeclareStatementReader(n, parent)
 	case *letAssignStatement:
 		return f.newAssignStatementReader(n, parent, "let")
+	case *assignExpr:
+		return f.newAssignStatementReader(n, parent, "")
 	case *ifStatement:
 		return f.newIfStatementReader(n, parent, true)
 	case *whileStatement:
@@ -471,10 +473,12 @@ func (f *formatter) newReturnNodeReader(n *returnStatement, parent node.Node) io
 	return strings.NewReader(buf.String())
 }
 
-func (f *formatter) newAssignStatementReader(node assignStatement, parent node.Node, opstr string) io.Reader {
+func (f *formatter) newAssignStatementReader(node assignNode, parent node.Node, opstr string) io.Reader {
 	var buf bytes.Buffer
-	buf.WriteString(opstr)
-	buf.WriteString(" ")
+	if opstr != "" {
+		buf.WriteString(opstr)
+		buf.WriteString(" ")
+	}
 	_, err := io.Copy(&buf, f.toReader(node.Left(), parent))
 	if err != nil {
 		return f.err(err, node.Left())

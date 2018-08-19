@@ -9,9 +9,11 @@ import (
 
 func parse(name string, inTokens <-chan token) *parser {
 	return &parser{
-		name:     name,
-		inTokens: inTokens,
-		outNodes: make(chan node.Node, 1),
+		name:       name,
+		inTokens:   inTokens,
+		outNodes:   make(chan node.Node, 1),
+		nextTokens: make([]token, 0, 16),
+		saveEnvs:   make([]saveEnv, 0, 4),
 	}
 }
 
@@ -20,11 +22,17 @@ func (p *parser) Nodes() <-chan node.Node {
 }
 
 type parser struct {
-	name     string
-	inTokens <-chan token
-	outNodes chan node.Node
-	token    *token  // next() sets read token to this.
-	tokbuf   []token // next() doesn't read from inTokens if len(tokbuf) > 0 .
+	name       string
+	inTokens   <-chan token
+	outNodes   chan node.Node
+	token      *token  // next() sets read token to this.
+	nextTokens []token // next() doesn't read from inTokens if len(nextTokens) > 0 .
+	saveEnvs   []saveEnv
+}
+
+type saveEnv struct {
+	unshifted  int
+	prevTokens []token
 }
 
 type expr interface {
@@ -68,28 +76,68 @@ func (p *parser) lexError() *node.ErrorNode {
 // If the next token is EOF, backup it for the next next().
 func (p *parser) next() *token {
 	var t token
-	if len(p.tokbuf) > 0 {
-		t = p.tokbuf[len(p.tokbuf)-1]
-		p.tokbuf = p.tokbuf[:len(p.tokbuf)-1]
+	if len(p.nextTokens) > 0 {
+		t = p.nextTokens[len(p.nextTokens)-1]
+		p.nextTokens = p.nextTokens[:len(p.nextTokens)-1]
 	} else {
 		t = <-p.inTokens
 	}
 	p.token = &t
 	if t.typ == tokenEOF {
-		p.backup(&t)
+		p.backup()
+	} else if len(p.saveEnvs) > 0 {
+		env := &p.saveEnvs[len(p.saveEnvs)-1]
+		env.prevTokens = append(env.prevTokens, t)
+		if env.unshifted > 0 {
+			env.unshifted--
+		}
 	}
 	return &t
 }
 
-func (p *parser) backup(t *token) {
-	p.tokbuf = append(p.tokbuf, *t)
+func (p *parser) unshift(t *token) {
+	if len(p.saveEnvs) > 0 {
+		env := &p.saveEnvs[len(p.saveEnvs)-1]
+		env.unshifted++
+	}
+	p.nextTokens = append(p.nextTokens, *t)
+}
+
+func (p *parser) backup() {
+	if len(p.saveEnvs) > 0 {
+		env := &p.saveEnvs[len(p.saveEnvs)-1]
+		if len(env.prevTokens) > 0 {
+			env.prevTokens = env.prevTokens[:len(env.prevTokens)-1]
+		}
+	}
+	p.nextTokens = append(p.nextTokens, *p.token)
+}
+
+func (p *parser) save() {
+	p.saveEnvs = append(p.saveEnvs, saveEnv{0, make([]token, 0, 8)})
+}
+
+func (p *parser) forget() {
+	p.saveEnvs = p.saveEnvs[:len(p.saveEnvs)-1]
+}
+
+func (p *parser) restore() {
+	if len(p.saveEnvs) == 0 {
+		return
+	}
+	env := &p.saveEnvs[len(p.saveEnvs)-1]
+	p.saveEnvs = p.saveEnvs[:len(p.saveEnvs)-1]
+	p.nextTokens = p.nextTokens[:len(p.nextTokens)-env.unshifted]
+	for i := len(env.prevTokens) - 1; i >= 0; i-- {
+		p.nextTokens = append(p.nextTokens, env.prevTokens[i])
+	}
 }
 
 // peek returns but does not consume
 // the next token in the input.
 func (p *parser) peek() *token {
 	t := p.next()
-	p.backup(t)
+	p.backup()
 	return t
 }
 
@@ -99,7 +147,7 @@ func (p *parser) accept(typ tokenType) bool {
 	if t.typ == typ {
 		return true
 	}
-	p.backup(t)
+	p.backup()
 	return false
 }
 
@@ -122,7 +170,7 @@ func (p *parser) acceptBlanks() bool {
 	case tokenEOF:
 		return true
 	default:
-		p.backup(t)
+		p.backup()
 		return false
 	}
 	for {
@@ -133,7 +181,7 @@ func (p *parser) acceptBlanks() bool {
 		case tokenEOF:
 			return true
 		default:
-			p.backup(t)
+			p.backup()
 			return true
 		}
 	}
@@ -252,36 +300,37 @@ func (p *parser) acceptStmtOrExpr() (node.Node, *node.ErrorNode) {
 	}
 
 	// Statement
+	// TODO merge accept()s into one switch statement
 	if p.accept(tokenFunc) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptFunction(false)
 	}
 	if p.accept(tokenConst) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptConstStatement()
 	}
 	if p.accept(tokenLet) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptLetStatement()
 	}
 	if p.accept(tokenReturn) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptReturnStatement()
 	}
 	if p.accept(tokenIf) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptIfStatement()
 	}
 	if p.accept(tokenWhile) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptWhileStatement()
 	}
 	if p.accept(tokenFor) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptForStatement()
 	}
-	if p.accept(tokenImport) || p.accept(tokenFrom) {
-		p.backup(p.token)
+	t := p.peek()
+	if t.typ == tokenImport || t.typ == tokenFrom {
 		return p.acceptImportStatement()
 	}
 
@@ -323,12 +372,57 @@ func (n *constStatement) GetLeftIdentifiers() []*identifierNode {
 	return getLeftIdentifiers(n)
 }
 
-// constStatement := "const" assignLhs "=" expr
+// constStatement := "const" assignExpr
 func (p *parser) acceptConstStatement() (node.Node, *node.ErrorNode) {
 	if !p.accept(tokenConst) {
 		return nil, p.errorf("expected %s but got %s", tokenName(tokenConst), tokenName(p.peek().typ))
 	}
 	pos := p.token.pos
+	assignPos, err := p.acceptAssignExpr()
+	if err != nil {
+		return nil, err
+	}
+	assign := assignPos.TerminalNode().(*assignExpr)
+	n := node.NewPosNode(pos, &constStatement{assign.left, assign.right})
+	return n, nil
+}
+
+type assignExpr struct {
+	left  expr
+	right expr
+}
+
+// Clone clones itself.
+func (n *assignExpr) Clone() node.Node {
+	return &assignExpr{n.left.Clone(), n.right.Clone()}
+}
+
+func (n *assignExpr) TerminalNode() node.Node {
+	return n
+}
+
+func (n *assignExpr) Position() *node.Pos {
+	return nil
+}
+
+func (n *assignExpr) IsExpr() bool {
+	return true
+}
+
+func (n *assignExpr) Left() node.Node {
+	return n.left
+}
+
+func (n *assignExpr) Right() expr {
+	return n.right
+}
+
+func (n *assignExpr) GetLeftIdentifiers() []*identifierNode {
+	return getLeftIdentifiers(n)
+}
+
+// assignExpr := assignLhs "=" expr
+func (p *parser) acceptAssignExpr() (node.Node, *node.ErrorNode) {
 	left, err := p.acceptAssignLHS()
 	if err != nil {
 		return nil, err
@@ -340,7 +434,10 @@ func (p *parser) acceptConstStatement() (node.Node, *node.ErrorNode) {
 	if err != nil {
 		return nil, err
 	}
-	n := node.NewPosNode(pos, &constStatement{left, right})
+	var n node.Node = &assignExpr{left, right}
+	if pos := left.Position(); pos != nil {
+		n = node.NewPosNode(pos, n)
+	}
 	return n, nil
 }
 
@@ -399,13 +496,13 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, *node.Pos, *node.Error
 	return ids, pos, nil
 }
 
-type assignStatement interface {
+type assignNode interface {
 	Left() node.Node
 	Right() expr
 	GetLeftIdentifiers() []*identifierNode
 }
 
-func getLeftIdentifiers(n assignStatement) []*identifierNode {
+func getLeftIdentifiers(n assignNode) []*identifierNode {
 	switch left := n.Left().TerminalNode().(type) {
 	case *listNode: // Destructuring
 		ids := make([]*identifierNode, 0, len(left.value))
@@ -499,7 +596,7 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 				"expected type specifier but got %s", tokenName(p.peek().typ),
 			)
 		}
-		p.backup(id)
+		p.unshift(id)
 	}
 
 	if arg, err := p.acceptVariableAndType(); err == nil {
@@ -589,8 +686,8 @@ func (p *parser) acceptReturnStatement() (node.Node, *node.ErrorNode) {
 	if p.accept(tokenNewline) {
 		return node.NewPosNode(ret.pos, &returnStatement{nil}), nil
 	}
-	if p.accept(tokenEOF) || p.accept(tokenCClose) { // EOF or end of block
-		p.backup(p.token)
+	t := p.peek()
+	if t.typ == tokenEOF || t.typ == tokenCClose { // EOF or end of block
 		return node.NewPosNode(ret.pos, &returnStatement{nil}), nil
 	}
 	expr, err := p.acceptExpr()
@@ -655,14 +752,14 @@ func (p *parser) acceptIfStatement() (node.Node, *node.ErrorNode) {
 	if p.accept(tokenElse) {
 		p.acceptBlanks()
 		if p.accept(tokenIf) {
-			p.backup(p.token)
+			p.backup()
 			ifstmt, err := p.acceptIfStatement()
 			if err != nil {
 				return nil, err
 			}
 			els = []node.Node{ifstmt}
 		} else if p.accept(tokenCOpen) {
-			p.backup(p.token)
+			p.backup()
 			block, err := p.acceptBlock()
 			if err != nil {
 				return nil, err
@@ -975,18 +1072,17 @@ func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
 	}
 
 	// No body, declaration only.
-	t := p.next()
+	t := p.peek()
 	if t.typ == tokenNewline || t.typ == tokenEOF {
 		return node.NewPosNode(pos, declare), nil
 	}
-	p.backup(t)
 
 	var bodyIsStmt bool
 	var body []node.Node
 
 	// Body
 	if p.accept(tokenCOpen) {
-		p.backup(p.token)
+		p.backup()
 		bodyIsStmt = true
 		block, err := p.acceptBlock()
 		if err != nil {
@@ -1061,7 +1157,7 @@ func (p *parser) acceptFuncDeclare() (*funcDeclareStatement, *node.Pos, *node.Er
 
 	// Modifiers
 	if p.accept(tokenLt) {
-		p.backup(p.token)
+		p.backup()
 		mods, err = p.acceptModifiers()
 		if err != nil {
 			return nil, nil, err
@@ -1202,7 +1298,7 @@ func (p *parser) acceptVariableAndType() (*argument, *node.ErrorNode) {
 	left := node.NewPosNode(p.token.pos, &identifierNode{p.token.val, true})
 
 	if !p.accept(tokenColon) {
-		p.backup(idToken)
+		p.unshift(idToken)
 		return nil, p.errorf(
 			"expected %s but got %s", tokenName(tokenColon), tokenName(p.peek().typ),
 		)
@@ -1211,7 +1307,7 @@ func (p *parser) acceptVariableAndType() (*argument, *node.ErrorNode) {
 	p.acceptBlanks()
 	typ, err := p.acceptType()
 	if err != nil {
-		p.backup(idToken)
+		p.unshift(idToken)
 		return nil, err
 	}
 	return &argument{left, typ, nil}, nil
@@ -1266,6 +1362,17 @@ func (p *parser) acceptType() (string, *node.ErrorNode) {
 }
 
 func (p *parser) acceptExpr() (expr, *node.ErrorNode) {
+	return p.acceptExpr0()
+}
+
+// expr0 := assignExpr | expr1
+func (p *parser) acceptExpr0() (expr, *node.ErrorNode) {
+	p.save()
+	if assign, err := p.acceptAssignExpr(); err == nil {
+		p.forget()
+		return assign, nil
+	}
+	p.restore()
 	return p.acceptExpr1()
 }
 
@@ -3065,7 +3172,8 @@ func (n *regNode) Value() string {
 	return n.value[1:]
 }
 
-// expr9: number /
+// expr9: int /
+//        float /
 //        (string ABNF is too complex! e.g. "string\n", 'str''ing') /
 //        "[" *blank *( expr1 *blank "," *blank ) "]" /
 //        "{" *blank *( expr1 *blank ":" *blank expr1 *blank "," *blank ) "}" /
@@ -3090,7 +3198,7 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 		p.acceptBlanks()
 		if !p.accept(tokenSqClose) {
 			for {
-				expr, err := p.acceptExpr1()
+				expr, err := p.acceptExpr()
 				if err != nil {
 					return nil, err
 				}
@@ -3121,7 +3229,7 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 		if !p.accept(tokenCClose) {
 			m = make([][]expr, 0, 16)
 			for {
-				left, err := p.acceptExpr1()
+				left, err := p.acceptExpr()
 				if err != nil {
 					return nil, err
 				}
@@ -3134,7 +3242,7 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 					)
 				}
 				p.acceptBlanks()
-				right, err := p.acceptExpr1()
+				right, err := p.acceptExpr()
 				if err != nil {
 					return nil, err
 				}
@@ -3154,7 +3262,7 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 		return n, nil
 	} else if p.accept(tokenPOpen) {
 		p.acceptBlanks()
-		n, err := p.acceptExpr1()
+		n, err := p.acceptExpr()
 		if err != nil {
 			return nil, err
 		}
@@ -3166,7 +3274,7 @@ func (p *parser) acceptExpr9() (expr, *node.ErrorNode) {
 		}
 		return n, nil
 	} else if p.accept(tokenFunc) {
-		p.backup(p.token)
+		p.backup()
 		return p.acceptFunction(true)
 	} else if p.accept(tokenOption) {
 		n := node.NewPosNode(p.token.pos, &optionNode{p.token.val})
