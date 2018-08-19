@@ -1,6 +1,8 @@
 scriptencoding utf-8
 
 let n = 42
+
+let i = let j = 0
 1 ? 2 : 3
 1 ? "12" : "34"
 1 && 2

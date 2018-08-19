@@ -495,6 +495,9 @@ func (f *formatter) newLetDeclareStatementReader(n *letDeclareStatement, parent 
 	var buf bytes.Buffer
 	buf.WriteString("let ")
 	for i := range n.left {
+		if i > 0 {
+			buf.WriteString(", ")
+		}
 		r := f.newArgumentReader(&n.left[i], n)
 		_, err := io.Copy(&buf, r)
 		if err != nil {
