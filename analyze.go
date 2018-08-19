@@ -72,6 +72,7 @@ const (
 	// tokenUnderscore as variable name.
 	underscoreVariableReference = "underscore-variable-reference"
 	convertUnderscoreVariable   = "convert-underscore-variable"
+	assignmentToConstVariable   = "assignment-to-const-variable"
 )
 
 var walkFuncs = []multiWalkFn{
@@ -121,6 +122,13 @@ func init() {
 			2,
 			false,
 			true,
+			true,
+		},
+		{
+			assignmentToConstVariable,
+			1,
+			true,
+			false,
 			true,
 		},
 	}
@@ -261,36 +269,52 @@ func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, [
 }
 
 func newScope() *scope {
-	return &scope{make([]map[string]*identifierNode, 0, 4)}
+	return &scope{
+		make([]map[string]*identifierNode, 0, 4),
+		make([]map[string]bool, 0, 4),
+	}
 }
 
 type scope struct {
-	vars []map[string]*identifierNode
+	vars    []map[string]*identifierNode
+	isConst []map[string]bool
 }
 
 func (s *scope) push() {
 	s.vars = append(s.vars, make(map[string]*identifierNode, 8))
+	s.isConst = append(s.isConst, make(map[string]bool, 8))
 }
 
 func (s *scope) pop() {
 	s.vars = s.vars[:len(s.vars)-1]
+	s.isConst = s.isConst[:len(s.isConst)-1]
 }
 
-func (s *scope) getVar(name string) *identifierNode {
-	return s.vars[len(s.vars)-1][name]
+func (s *scope) getVar(name string) (id *identifierNode, isConst bool) {
+	id = s.vars[len(s.vars)-1][name]
+	isConst = s.isConst[len(s.vars)-1][name]
+	return
 }
 
-func (s *scope) getOuterVar(name string) *identifierNode {
+func (s *scope) getOuterVar(name string) (id *identifierNode, isConst bool) {
 	for i := len(s.vars) - 1; i >= 0; i-- {
 		if s.vars[i][name] != nil {
-			return s.vars[i][name]
+			id = s.vars[i][name]
+			isConst = s.isConst[i][name]
+			break
 		}
 	}
-	return nil
+	return
 }
 
 func (s *scope) addVar(id *identifierNode) {
 	s.vars[len(s.vars)-1][id.value] = id
+	s.isConst[len(s.vars)-1][id.value] = false
+}
+
+func (s *scope) addConstVar(id *identifierNode) {
+	s.vars[len(s.vars)-1][id.value] = id
+	s.isConst[len(s.vars)-1][id.value] = true
 }
 
 // checkVariable checks:
@@ -319,7 +343,7 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 		if _, ok := body[i].TerminalNode().(*funcStmtOrExpr); ok {
 			continue // Skip another function
 		}
-		if vs := a.getDeclaredVars(body[i]); len(vs) > 0 { // Found declaration.
+		if vs, isConst := a.getDeclaredVars(body[i]); len(vs) > 0 { // Found declaration.
 			for i := range vs {
 				var id *identifierNode
 				if nn, ok := vs[i].TerminalNode().(*identifierNode); ok {
@@ -327,7 +351,7 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 				} else {
 					continue
 				}
-				if v := scope.getVar(id.value); v != nil {
+				if v, _ := scope.getVar(id.value); v != nil {
 					if a.enabled(duplicateDeclaration) {
 						var declared string
 						if pos := v.Position(); pos != nil {
@@ -342,30 +366,40 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 					continue
 				}
 				if id.value != "_" {
-					scope.addVar(id)
+					if isConst {
+						scope.addConstVar(id)
+					} else {
+						scope.addVar(id)
+					}
 				}
 			}
 		}
 		if e := a.checkInnerBlock(body[i], scope); len(e) > 0 { // Check if,while,...
 			errs = append(errs, e...)
 		}
-		vs, e := a.getReferenceVars(body[i])
+		vs, assigned, e := a.getReferenceVars(body[i])
 		errs = append(errs, e...)
-		if len(vs) > 0 { // Found reference variables.
-			for i := range vs {
-				var id *identifierNode
-				if nn, ok := vs[i].TerminalNode().(*identifierNode); ok {
-					id = nn
-				} else {
-					continue
-				}
-				if scope.getOuterVar(id.value) == nil && a.enabled(undeclaredVariable) {
-					err := a.err(
-						errors.New("undefined: "+id.value),
-						vs[i],
-					)
-					errs = append(errs, *err)
-				}
+		for i := range vs { // Found reference variables.
+			var id *identifierNode
+			if nn, ok := vs[i].TerminalNode().(*identifierNode); ok {
+				id = nn
+			} else {
+				continue
+			}
+			v, isConst := scope.getOuterVar(id.value)
+			if v == nil && a.enabled(undeclaredVariable) {
+				err := a.err(
+					errors.New("undefined: "+id.value),
+					vs[i],
+				)
+				errs = append(errs, *err)
+			}
+			if assigned[i] && v != nil && isConst && a.enabled(assignmentToConstVariable) {
+				err := a.err(
+					errors.New("assignment to const variable: "+id.value),
+					vs[i],
+				)
+				errs = append(errs, *err)
 			}
 		}
 	}
@@ -389,54 +423,40 @@ func (a *analyzer) checkInnerBlock(n node.Node, scope *scope) []node.ErrorNode {
 // Get variable identifier nodes in a declaration.
 // Returned nodes also have a position (node.Position() != nil)
 // if original node has a position.
-func (a *analyzer) getDeclaredVars(n node.Node) []node.Node {
+func (a *analyzer) getDeclaredVars(n node.Node) ([]node.Node, bool) {
 	switch nn := n.TerminalNode().(type) {
-	case *assignExpr:
-		// *assignExpr is assignNode, but is not a declaration!
-		return nil
 	case assignNode:
-		switch nnn := nn.Left().TerminalNode().(type) {
-		case *listNode:
-			vars := make([]node.Node, 0, len(nnn.value))
-			for i := range nnn.value {
-				if _, ok := nnn.value[i].TerminalNode().(*identifierNode); ok {
-					vars = append(vars, nnn.value[i])
-				}
-			}
-			return vars
-		case *identifierNode:
-			return []node.Node{nn.Left()}
-		default:
-			return nil
+		isConst := false
+		switch nn.(type) {
+		case *assignExpr:
+			// *assignExpr is assignNode, but is not a declaration!
+			return nil, false
+		case *constStatement:
+			isConst = true
 		}
+		return nn.GetLeftIdentifiers(), isConst
 	case *letDeclareStatement:
-		vars := make([]node.Node, 0, len(nn.left))
-		for i := range nn.left {
-			arg := nn.left[i]
-			if _, ok := arg.left.TerminalNode().(*identifierNode); ok {
-				vars = append(vars, arg.left)
-			}
-		}
-		return vars
+		return nn.GetLeftIdentifiers(), false
 	case *funcDeclareStatement:
-		id := &identifierNode{nn.name, true}
-		var retNode node.Node = id
+		var id node.Node = &identifierNode{nn.name, true}
 		if pos := n.Position(); pos != nil {
-			retNode = node.NewPosNode(pos, id)
+			id = node.NewPosNode(pos, id)
 		}
-		return []node.Node{retNode}
+		return []node.Node{id}, false
 	default:
-		return nil
+		return nil, false
 	}
 }
 
 // Get variable identifier nodes which references to.
 // Returned nodes also have a position (node.Position() != nil)
 // if original node has a position.
-func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode) {
+func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []bool, []node.ErrorNode) {
 	errs := make([]node.ErrorNode, 0, 4)
 	ids := make([]node.Node, 0, 8)
-	declroutes := make([][]int, 0, 8)
+	assigned := make([]bool, 0, 8)
+	declRoutes := make([][]int, 0, 8)
+	assignRoutes := make([][]int, 0, 8)
 	walkNode(n, func(ctrl *walkCtrl, n node.Node) node.Node {
 		switch nn := n.TerminalNode().(type) {
 		case *funcStmtOrExpr:
@@ -445,16 +465,18 @@ func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode)
 			ctrl.dontFollowInner() // skip another function.
 		case *assignExpr:
 			// *assignExpr is assignNode, but is not a declaration!
+			lhs := append(ctrl.route(), 0)
+			assignRoutes = append(assignRoutes, lhs)
 		case assignNode:
 			lhs := append(ctrl.route(), 0)
-			declroutes = append(declroutes, lhs)
+			declRoutes = append(declRoutes, lhs)
 		case *letDeclareStatement:
 			lhs := append(ctrl.route(), 0)
-			declroutes = append(declroutes, lhs)
+			declRoutes = append(declRoutes, lhs)
 		case *identifierNode:
 			// The identifierNode is used for variable name, and
 			// is not in left-hand side of declaration node.
-			if nn.isVarname && !containsRoute(ctrl.route(), declroutes) {
+			if nn.isVarname && !containsRoute(ctrl.route(), declRoutes) {
 				if nn.value == "_" {
 					if a.enabled(underscoreVariableReference) {
 						err := a.err(
@@ -464,13 +486,14 @@ func (a *analyzer) getReferenceVars(n node.Node) ([]node.Node, []node.ErrorNode)
 						errs = append(errs, *err)
 					}
 				} else {
+					assigned = append(assigned, containsRoute(ctrl.route(), assignRoutes))
 					ids = append(ids, n)
 				}
 			}
 		}
 		return n
 	})
-	return ids, errs
+	return ids, assigned, errs
 }
 
 // convert converts some specific nodes.
@@ -514,7 +537,7 @@ func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 	nr := 0
 	for i := range body {
 		body[i] = walkNode(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
-			var ids []*identifierNode
+			var ids []node.Node
 			switch nn := n.TerminalNode().(type) {
 			case *funcStmtOrExpr:
 				ctrl.dontFollowInner()
@@ -525,13 +548,14 @@ func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
 				return n
 			}
 			for i := range ids {
+				id := ids[i].TerminalNode().(*identifierNode)
 				// "_varname" -> "__varname"
-				if ids[i].value[0] == '_' && len(ids[i].value) != 1 {
-					ids[i].value = "__" + ids[i].value[1:]
+				if id.value[0] == '_' && len(id.value) != 1 {
+					id.value = "__" + id.value[1:]
 				}
 				// "_" -> "_unused{nr}"
-				if ids[i].value == "_" {
-					ids[i].value = "_unused" + strconv.Itoa(nr)
+				if id.value == "_" {
+					id.value = "_unused" + strconv.Itoa(nr)
 					nr++
 				}
 			}

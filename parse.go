@@ -355,7 +355,7 @@ func (n *constStatement) Right() expr {
 	return n.right
 }
 
-func (n *constStatement) GetLeftIdentifiers() []*identifierNode {
+func (n *constStatement) GetLeftIdentifiers() []node.Node {
 	return getLeftIdentifiers(n)
 }
 
@@ -404,7 +404,7 @@ func (n *assignExpr) Right() expr {
 	return n.right
 }
 
-func (n *assignExpr) GetLeftIdentifiers() []*identifierNode {
+func (n *assignExpr) GetLeftIdentifiers() []node.Node {
 	return getLeftIdentifiers(n)
 }
 
@@ -486,21 +486,21 @@ func (p *parser) acceptDestructuringAssignment() ([]expr, *node.Pos, *node.Error
 type assignNode interface {
 	Left() node.Node
 	Right() expr
-	GetLeftIdentifiers() []*identifierNode
+	GetLeftIdentifiers() []node.Node
 }
 
-func getLeftIdentifiers(n assignNode) []*identifierNode {
+func getLeftIdentifiers(n assignNode) []node.Node {
 	switch left := n.Left().TerminalNode().(type) {
 	case *listNode: // Destructuring
-		ids := make([]*identifierNode, 0, len(left.value))
+		ids := make([]node.Node, 0, len(left.value))
 		for i := range left.value {
-			if id, ok := left.value[i].TerminalNode().(*identifierNode); ok {
-				ids = append(ids, id)
+			if _, ok := left.value[i].TerminalNode().(*identifierNode); ok {
+				ids = append(ids, left.value[i])
 			}
 		}
 		return ids
 	case *identifierNode:
-		return []*identifierNode{left}
+		return []node.Node{n.Left()}
 	default:
 		return nil
 	}
@@ -536,7 +536,7 @@ func (n *letAssignStatement) Right() expr {
 	return n.right
 }
 
-func (n *letAssignStatement) GetLeftIdentifiers() []*identifierNode {
+func (n *letAssignStatement) GetLeftIdentifiers() []node.Node {
 	return getLeftIdentifiers(n)
 }
 
@@ -563,6 +563,17 @@ func (n *letDeclareStatement) Position() *node.Pos {
 
 func (n *letDeclareStatement) IsExpr() bool {
 	return false
+}
+
+func (n *letDeclareStatement) GetLeftIdentifiers() []node.Node {
+	vars := make([]node.Node, 0, len(n.left))
+	for i := range n.left {
+		arg := n.left[i]
+		if _, ok := arg.left.TerminalNode().(*identifierNode); ok {
+			vars = append(vars, arg.left)
+		}
+	}
+	return vars
 }
 
 // letStatement := letDeclareStatement / letAssignStatement
@@ -845,7 +856,7 @@ func (n *forStatement) Right() expr {
 	return n.right
 }
 
-func (n *forStatement) GetLeftIdentifiers() []*identifierNode {
+func (n *forStatement) GetLeftIdentifiers() []node.Node {
 	return getLeftIdentifiers(n)
 }
 

@@ -14,3 +14,8 @@
 # expected type specifier but got newline
 # expected type specifier but got EOF
 # let baz
+# const foo = 1
+# foo = 42
+# const [bar, baz] = [2, 3]
+# bar = 42
+# baz = 42
