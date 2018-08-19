@@ -300,37 +300,24 @@ func (p *parser) acceptStmtOrExpr() (node.Node, *node.ErrorNode) {
 	}
 
 	// Statement
-	// TODO merge accept()s into one switch statement
-	if p.accept(tokenFunc) {
-		p.backup()
+	switch p.peek().typ {
+	case tokenFunc:
 		return p.acceptFunction(false)
-	}
-	if p.accept(tokenConst) {
-		p.backup()
+	case tokenConst:
 		return p.acceptConstStatement()
-	}
-	if p.accept(tokenLet) {
-		p.backup()
+	case tokenLet:
 		return p.acceptLetStatement()
-	}
-	if p.accept(tokenReturn) {
-		p.backup()
+	case tokenReturn:
 		return p.acceptReturnStatement()
-	}
-	if p.accept(tokenIf) {
-		p.backup()
+	case tokenIf:
 		return p.acceptIfStatement()
-	}
-	if p.accept(tokenWhile) {
-		p.backup()
+	case tokenWhile:
 		return p.acceptWhileStatement()
-	}
-	if p.accept(tokenFor) {
-		p.backup()
+	case tokenFor:
 		return p.acceptForStatement()
-	}
-	t := p.peek()
-	if t.typ == tokenImport || t.typ == tokenFrom {
+	case tokenImport:
+		fallthrough
+	case tokenFrom:
 		return p.acceptImportStatement()
 	}
 
