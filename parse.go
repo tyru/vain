@@ -46,13 +46,25 @@ type statement interface {
 }
 
 func (p *parser) Run() {
-	toplevel, err := p.acceptTopLevel()
-	if err != nil {
-		p.emit(err)
-	} else {
-		p.emit(toplevel)
+Loop:
+	for {
+		switch toplevel, err := p.acceptTopLevel(); {
+		case err == errParseEOF:
+			p.emit(toplevel)
+			break Loop
+		case err == errParseEOF:
+			p.emit(err)
+		case err == errParseEOF:
+			p.emit(toplevel)
+		}
 	}
 	close(p.outNodes) // No more nodes will be delivered.
+}
+
+func (p *parser) drain() {
+	p.saveEnvs = p.saveEnvs[:0]
+	for p.next().typ != tokenEOF {
+	}
 }
 
 // emit passes an node back to the client.
@@ -73,6 +85,13 @@ func (p *parser) errorf(format string, args ...interface{}) *node.ErrorNode {
 // It is called when tokenError was given.
 func (p *parser) lexError() *node.ErrorNode {
 	return node.NewErrorNode(errors.New(p.token.val), p.token.pos)
+}
+
+// declareOnlyError returns an declare only error node.
+func (p *parser) declareOnlyError(pos *node.Pos) *node.ErrorNode {
+	err := fmt.Errorf("[parse] %s:%d:%d: this file is declaration only",
+		p.name, pos.Line(), pos.Col()+1)
+	return node.NewErrorNode(err, pos)
 }
 
 // next returns the next token in the input.
@@ -250,9 +269,6 @@ func (p *parser) acceptTopLevel() (*node.PosNode, *node.ErrorNode) {
 	for {
 		n, err := p.acceptStmtOrExpr()
 		if err != nil {
-			if err == errParseEOF {
-				err = nil
-			}
 			return node.NewPosNode(pos, toplevel), err
 		}
 		toplevel.body = append(toplevel.body, n)
@@ -293,6 +309,7 @@ func (p *parser) acceptStmtOrExpr() (node.Node, *node.ErrorNode) {
 		return nil, errParseEOF
 	}
 	if p.accept(tokenError) {
+		p.drain()
 		return nil, p.lexError()
 	}
 
@@ -364,6 +381,10 @@ func (n *constStatement) GetLeftIdentifiers() []node.Node {
 
 // constStatement := "const" assignExpr
 func (p *parser) acceptConstStatement() (node.Node, *node.ErrorNode) {
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
+	}
 	if !p.accept(tokenConst) {
 		return nil, p.errorf("expected %s but got %s", tokenName(tokenConst), tokenName(p.peek().typ))
 	}
@@ -600,7 +621,7 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 		p.unshift(id)
 	}
 
-	if arg, err := p.acceptVariableAndType(); err == nil {
+	if arg, err := p.acceptVariableAndType(); err == nil { // letDeclareStatement
 		if id, ok := arg.left.TerminalNode().(*identifierNode); ok {
 			if id.value == "_" {
 				return nil, p.errorf("underscore variable can only be used in declaration")
@@ -628,7 +649,11 @@ func (p *parser) acceptLetStatement() (*node.PosNode, *node.ErrorNode) {
 		}
 		n := node.NewPosNode(pos, &letDeclareStatement{left})
 		return n, nil
-	} else if l, err := p.acceptAssignLHS(); err == nil {
+	} else if l, err := p.acceptAssignLHS(); err == nil { // letAssignStatement
+		if p.declareOnly {
+			p.drain()
+			return nil, p.declareOnlyError(p.peek().pos)
+		}
 		left = l
 		if !p.accept(tokenEqual) {
 			return nil, p.errorf(
@@ -680,6 +705,10 @@ func (n *returnStatement) IsExpr() bool {
 // And if tokenCClose is detected instead of expr,
 // it must be empty return statement inside block.
 func (p *parser) acceptReturnStatement() (node.Node, *node.ErrorNode) {
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
+	}
 	if !p.accept(tokenReturn) {
 		return nil, p.errorf("expected %s but got %s", tokenName(tokenReturn), tokenName(p.peek().typ))
 	}
@@ -734,6 +763,10 @@ func (n *ifStatement) IsExpr() bool {
 // ifStatement := "if" *blank expr *blank block
 //                [ *blank "else" *blank ( ifStatement | block ) ]
 func (p *parser) acceptIfStatement() (node.Node, *node.ErrorNode) {
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
+	}
 	if !p.accept(tokenIf) {
 		return nil, p.errorf("expected if statement but got %s", tokenName(p.peek().typ))
 	}
@@ -804,6 +837,10 @@ func (n *whileStatement) IsExpr() bool {
 
 // whileStatement := "while" *blank expr *blank block
 func (p *parser) acceptWhileStatement() (node.Node, *node.ErrorNode) {
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
+	}
 	if !p.accept(tokenWhile) {
 		return nil, p.errorf("expected while statement but got %s", tokenName(p.peek().typ))
 	}
@@ -865,6 +902,10 @@ func (n *forStatement) GetLeftIdentifiers() []node.Node {
 
 // forStatement := "for" *blank assignLhs *blank "in" *blank expr *blank block
 func (p *parser) acceptForStatement() (node.Node, *node.ErrorNode) {
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
+	}
 	if !p.accept(tokenFor) {
 		return nil, p.errorf("expected for statement but got %s", tokenName(p.peek().typ))
 	}
@@ -1076,6 +1117,10 @@ func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
 	t := p.peek()
 	if t.typ == tokenNewline || t.typ == tokenEOF {
 		return declare, nil
+	}
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
 	}
 
 	var bodyIsStmt bool
@@ -1363,6 +1408,10 @@ func (p *parser) acceptType() (string, *node.ErrorNode) {
 }
 
 func (p *parser) acceptExpr() (expr, *node.ErrorNode) {
+	if p.declareOnly {
+		p.drain()
+		return nil, p.declareOnlyError(p.peek().pos)
+	}
 	return p.acceptExpr0()
 }
 

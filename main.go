@@ -212,7 +212,7 @@ func loadStdlib() (*NamespaceDB, error) {
 		name    string
 		content string
 	}
-	files := make([]nameAndContent, 0, 4)
+	files := make([]nameAndContent, 0, len(filenames))
 	for _, name := range filenames {
 		src, err := os.Open(name)
 		if err != nil {
@@ -231,7 +231,7 @@ func loadStdlib() (*NamespaceDB, error) {
 
 	var wgAnalyze sync.WaitGroup
 	nodes := make(chan node.Node, len(files))
-	errs := make([]error, 8)
+	errs := make([]error, len(files))
 	analyzer := analyze("<stdlib>", nodes, ToplevelNamespace)
 
 	// 5. Handle analyzer errors.
