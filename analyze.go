@@ -29,8 +29,8 @@ func analyze(name string, inNodes <-chan node.Node) *analyzer {
 	}
 	checkers := make([]multiWalkFn, 0, checkNum)
 	converters := make([]multiWalkFn, 0, converterNum)
-	for id := range funcs {
-		switch id {
+	for id, v := range funcs {
+		switch v {
 		case 1:
 			checkers = append(checkers, walkFuncs[id])
 		case 2:
