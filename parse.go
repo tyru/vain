@@ -7,13 +7,14 @@ import (
 	"github.com/tyru/vain/node"
 )
 
-func parse(name string, inTokens <-chan token) *parser {
+func parse(name string, inTokens <-chan token, declareOnly bool) *parser {
 	return &parser{
-		name:       name,
-		inTokens:   inTokens,
-		outNodes:   make(chan node.Node, 1),
-		nextTokens: make([]token, 0, 16),
-		saveEnvs:   make([]saveEnv, 0, 4),
+		name:        name,
+		inTokens:    inTokens,
+		outNodes:    make(chan node.Node, 1),
+		declareOnly: declareOnly,
+		nextTokens:  make([]token, 0, 16),
+		saveEnvs:    make([]saveEnv, 0, 4),
 	}
 }
 
@@ -22,12 +23,13 @@ func (p *parser) Nodes() <-chan node.Node {
 }
 
 type parser struct {
-	name       string
-	inTokens   <-chan token
-	outNodes   chan node.Node
-	token      *token  // next() sets read token to this.
-	nextTokens []token // next() doesn't read from inTokens if len(nextTokens) > 0 .
-	saveEnvs   []saveEnv
+	name        string
+	inTokens    <-chan token
+	outNodes    chan node.Node
+	declareOnly bool
+	token       *token  // next() sets read token to this.
+	nextTokens  []token // next() doesn't read from inTokens if len(nextTokens) > 0 .
+	saveEnvs    []saveEnv
 }
 
 type saveEnv struct {
@@ -58,7 +60,7 @@ func (p *parser) emit(node node.Node) {
 	p.outNodes <- node
 }
 
-// errorf returns an error token and terminates the scan
+// errorf returns an error token and terminates the scan node.
 func (p *parser) errorf(format string, args ...interface{}) *node.ErrorNode {
 	newargs := make([]interface{}, 0, len(args)+2)
 	newargs = append(newargs, p.name, p.token.pos.Line(), p.token.pos.Col()+1)
@@ -67,7 +69,8 @@ func (p *parser) errorf(format string, args ...interface{}) *node.ErrorNode {
 	return node.NewErrorNode(err, p.token.pos)
 }
 
-// lexError is called when tokenError was given.
+// lexError returns an lex error node.
+// It is called when tokenError was given.
 func (p *parser) lexError() *node.ErrorNode {
 	return node.NewErrorNode(errors.New(p.token.val), p.token.pos)
 }
@@ -1064,7 +1067,7 @@ func (n *funcStmtOrExpr) IsExpr() bool {
 // funcStmtOrExpr := funcDeclare ( expr1 | block )
 // funcDeclareStatement := funcDeclare ( LF | EOF )
 func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
-	declare, pos, err := p.acceptFuncDeclare()
+	declare, err := p.acceptFuncDeclare()
 	if err != nil {
 		return nil, err
 	}
@@ -1072,7 +1075,7 @@ func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
 	// No body, declaration only.
 	t := p.peek()
 	if t.typ == tokenNewline || t.typ == tokenEOF {
-		return node.NewPosNode(pos, declare), nil
+		return declare, nil
 	}
 
 	var bodyIsStmt bool
@@ -1096,12 +1099,12 @@ func (p *parser) acceptFunction(isExpr bool) (*node.PosNode, *node.ErrorNode) {
 	}
 
 	funcNode := &funcStmtOrExpr{
-		declare,
+		declare.TerminalNode().(*funcDeclareStatement),
 		bodyIsStmt,
 		body,
 		isExpr,
 	}
-	return node.NewPosNode(pos, funcNode), nil
+	return node.NewPosNode(declare.Position(), funcNode), nil
 }
 
 type funcDeclareStatement struct {
@@ -1137,9 +1140,9 @@ func (n *funcDeclareStatement) IsExpr() bool {
 }
 
 // funcDeclare := "func" [ funcModifierList ] [ identifier ] functionCallSignature
-func (p *parser) acceptFuncDeclare() (*funcDeclareStatement, *node.Pos, *node.ErrorNode) {
+func (p *parser) acceptFuncDeclare() (*node.PosNode, *node.ErrorNode) {
 	if !p.accept(tokenFunc) {
-		return nil, nil, p.errorf(
+		return nil, p.errorf(
 			"expected %s but got %s",
 			tokenName(tokenFunc),
 			tokenName(p.peek().typ),
@@ -1158,7 +1161,7 @@ func (p *parser) acceptFuncDeclare() (*funcDeclareStatement, *node.Pos, *node.Er
 		p.backup()
 		mods, err = p.acceptModifiers()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -1170,11 +1173,11 @@ func (p *parser) acceptFuncDeclare() (*funcDeclareStatement, *node.Pos, *node.Er
 	// functionCallSignature
 	args, retType, err = p.acceptFunctionCallSignature()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	f := &funcDeclareStatement{mods, name, args, retType}
-	return f, pos, nil
+	return node.NewPosNode(pos, f), nil
 }
 
 // functionModifierList := "<" *blank

@@ -8,7 +8,7 @@ import (
 	"github.com/tyru/vain/node"
 )
 
-func analyze(name string, inNodes <-chan node.Node) *analyzer {
+func analyze(name string, inNodes <-chan node.Node, ns Namespace) *analyzer {
 	// TODO Give policies by argument?
 	// But some ruleMap are required to emit "correct" vim script intermediate code.
 	policies := defaultPolicies
@@ -44,6 +44,8 @@ func analyze(name string, inNodes <-chan node.Node) *analyzer {
 		newMultiWalker(checkers...),
 		newMultiWalker(converters...),
 		policies,
+		ns,
+		nil,
 	}
 }
 
@@ -54,10 +56,16 @@ type analyzer struct {
 	checkers   *multiWalker
 	converters *multiWalker
 	policies   map[string]bool
+	ns         Namespace
+	nsdb       *NamespaceDB
 }
 
 func (a *analyzer) Nodes() <-chan node.Node {
 	return a.outNodes
+}
+
+func (a *analyzer) NamespaceDB() *NamespaceDB {
+	return a.nsdb
 }
 
 func (a *analyzer) enabled(name string) bool {
@@ -164,7 +172,8 @@ func (n *typedNode) Clone() node.Node {
 	return &typedNode{inner, n.typ}
 }
 
-func (a *analyzer) Run() {
+func (a *analyzer) Run(nsdb *NamespaceDB) {
+	a.nsdb = nsdb
 	for n := range a.inNodes {
 		if top, ok := n.TerminalNode().(*topLevelNode); ok {
 			result, errs := a.analyze(top)
@@ -268,35 +277,56 @@ func checkToplevelReturn(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, [
 	}
 }
 
-func newScope() *scope {
-	return &scope{
+// NamespaceDB holds namespaces.
+type NamespaceDB map[string]*Namespace
+
+// getNamespace gets a namespace.
+func (db NamespaceDB) getNamespace(name string) *Namespace {
+	return db[name]
+}
+
+// setNamespace sets a namespace.
+func (db NamespaceDB) setNamespace(ns *Namespace) {
+	db[string(*ns)] = ns
+}
+
+// Namespace holds scopes.
+type Namespace string
+
+// ToplevelNamespace is the top level namespace constant.
+const ToplevelNamespace = Namespace("")
+
+// NewScope is the constructor for Scope.
+func NewScope() *Scope {
+	return &Scope{
 		make([]map[string]*identifierNode, 0, 4),
 		make([]map[string]bool, 0, 4),
 	}
 }
 
-type scope struct {
+// Scope holds variables.
+type Scope struct {
 	vars    []map[string]*identifierNode
 	isConst []map[string]bool
 }
 
-func (s *scope) push() {
+func (s *Scope) push() {
 	s.vars = append(s.vars, make(map[string]*identifierNode, 8))
 	s.isConst = append(s.isConst, make(map[string]bool, 8))
 }
 
-func (s *scope) pop() {
+func (s *Scope) pop() {
 	s.vars = s.vars[:len(s.vars)-1]
 	s.isConst = s.isConst[:len(s.isConst)-1]
 }
 
-func (s *scope) getVar(name string) (id *identifierNode, isConst bool) {
+func (s *Scope) getVar(name string) (id *identifierNode, isConst bool) {
 	id = s.vars[len(s.vars)-1][name]
 	isConst = s.isConst[len(s.vars)-1][name]
 	return
 }
 
-func (s *scope) getOuterVar(name string) (id *identifierNode, isConst bool) {
+func (s *Scope) getOuterVar(name string) (id *identifierNode, isConst bool) {
 	for i := len(s.vars) - 1; i >= 0; i-- {
 		if s.vars[i][name] != nil {
 			id = s.vars[i][name]
@@ -307,12 +337,12 @@ func (s *scope) getOuterVar(name string) (id *identifierNode, isConst bool) {
 	return
 }
 
-func (s *scope) addVar(id *identifierNode) {
+func (s *Scope) addVar(id *identifierNode) {
 	s.vars[len(s.vars)-1][id.value] = id
 	s.isConst[len(s.vars)-1][id.value] = false
 }
 
-func (s *scope) addConstVar(id *identifierNode) {
+func (s *Scope) addConstVar(id *identifierNode) {
 	s.vars[len(s.vars)-1][id.value] = id
 	s.isConst[len(s.vars)-1][id.value] = true
 }
@@ -327,16 +357,16 @@ func (s *scope) addConstVar(id *identifierNode) {
 func checkVariable(a *analyzer, _ *walkCtrl, n node.Node) (node.Node, []node.ErrorNode) {
 	switch nn := n.TerminalNode().(type) {
 	case *topLevelNode:
-		return n, a.checkVariable(nn.body, newScope())
+		return n, a.checkVariable(nn.body, NewScope())
 	case *funcStmtOrExpr:
-		return n, a.checkVariable(nn.body, newScope())
+		return n, a.checkVariable(nn.body, NewScope())
 	default:
 		return n, nil
 	}
 }
 
 // Check the scope of the function, but won't check another function's scope.
-func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNode {
+func (a *analyzer) checkVariable(body []node.Node, scope *Scope) []node.ErrorNode {
 	errs := make([]node.ErrorNode, 0, 4)
 	scope.push()
 	for i := range body {
@@ -407,7 +437,7 @@ func (a *analyzer) checkVariable(body []node.Node, scope *scope) []node.ErrorNod
 	return errs
 }
 
-func (a *analyzer) checkInnerBlock(n node.Node, scope *scope) []node.ErrorNode {
+func (a *analyzer) checkInnerBlock(n node.Node, scope *Scope) []node.ErrorNode {
 	switch nn := n.TerminalNode().(type) {
 	case *ifStatement:
 		return a.checkVariable(nn.body, scope)
@@ -522,9 +552,9 @@ func (a *analyzer) convert(tNode *typedNode) (*typedNode, []node.ErrorNode) {
 func convertVariableNames(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, []node.ErrorNode) {
 	switch nn := n.TerminalNode().(type) {
 	case *topLevelNode:
-		a.convertVariableNames(nn.body, newScope())
+		a.convertVariableNames(nn.body, NewScope())
 	case *funcStmtOrExpr:
-		a.convertVariableNames(nn.body, newScope())
+		a.convertVariableNames(nn.body, NewScope())
 	default:
 		return n, nil
 	}
@@ -533,7 +563,7 @@ func convertVariableNames(a *analyzer, ctrl *walkCtrl, n node.Node) (node.Node, 
 
 // TODO shadowing
 // TODO use scope
-func (a *analyzer) convertVariableNames(body []node.Node, scope *scope) {
+func (a *analyzer) convertVariableNames(body []node.Node, scope *Scope) {
 	nr := 0
 	for i := range body {
 		body[i] = walkNode(body[i], func(ctrl *walkCtrl, n node.Node) node.Node {
